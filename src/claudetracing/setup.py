@@ -133,7 +133,7 @@ def create_settings_file(
     # Load existing settings or start fresh
     if settings_path.exists():
         existing = json.loads(settings_path.read_text())
-        print(f"Found existing settings.json, merging tracing config...")
+        print("Found existing settings.json, merging tracing config...")
     else:
         existing = {}
 
@@ -239,8 +239,8 @@ def setup_local() -> int:
     update_gitignore(project_root)
     print("Updated .gitignore")
 
-    print(f"\nSetup complete! Restart Claude Code to enable tracing.")
-    print(f"Traces will be stored locally in: mlruns/")
+    print("\nSetup complete! Restart Claude Code to enable tracing.")
+    print("Traces will be stored locally in: mlruns/")
     return 0
 
 
@@ -309,7 +309,7 @@ def setup_databricks() -> int:
         experiment_path = f"/Workspace/Users/{user}/{exp_name}"
 
     # Verify connection BEFORE creating config
-    print(f"\nVerifying connection to Databricks...")
+    print("\nVerifying connection to Databricks...")
     if not verify_connection(profile, experiment_path):
         print("\n" + "=" * 50)
         print("ERROR: Could not connect to Databricks!")
@@ -334,6 +334,6 @@ def setup_databricks() -> int:
     update_gitignore(project_root)
     print("Updated .gitignore")
 
-    print(f"\nSetup complete! Restart Claude Code to enable tracing.")
+    print("\nSetup complete! Restart Claude Code to enable tracing.")
     print(f"Traces will be sent to: {experiment_path}")
     return 0

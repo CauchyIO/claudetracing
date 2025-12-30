@@ -1,6 +1,6 @@
 [project]
 name = "claudetracing"
-version = "0.1.0"
+version = "0.1.1"
 description = "MLflow tracing for Claude Code sessions with Databricks integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,6 +47,7 @@ package = true
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=6.0",
+    "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]

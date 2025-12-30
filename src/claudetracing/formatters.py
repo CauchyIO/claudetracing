@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from .models import TraceData, TraceSummary
+from .models import TraceData
 
 
 def to_summary(trace: TraceData) -> str:
