@@ -193,14 +193,25 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
     Returns:
         True if connection succeeded
     """
+    import signal
+
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Connection timed out")
+
     try:
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(30)  # 30 second timeout
+
         import mlflow
 
         os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
         mlflow.set_tracking_uri(f"databricks://{profile}")
-        mlflow.get_experiment_by_name(experiment_path)  # type: ignore[possibly-missing-attribute]
+        mlflow.get_experiment_by_name(experiment_path)
+
+        signal.alarm(0)  # Cancel timeout
         return True
-    except Exception:
+    except (TimeoutError, Exception):
+        signal.alarm(0)
         return False
 
 

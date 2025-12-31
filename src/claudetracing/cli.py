@@ -5,15 +5,6 @@ from typing import Optional
 
 import typer
 
-from .client import TracingClient
-from .formatters import (
-    format_for_context,
-    format_tool_usage,
-    format_traces_json,
-    format_traces_summary,
-)
-from .setup import load_settings
-
 app = typer.Typer(help="Claude Code MLflow tracing CLI")
 
 
@@ -43,6 +34,15 @@ def search(
     ),
 ):
     """Search and retrieve traces."""
+    from .client import TracingClient
+    from .formatters import (
+        format_for_context,
+        format_tool_usage,
+        format_traces_json,
+        format_traces_summary,
+    )
+    from .setup import load_settings
+
     load_settings()  # Load .claude/settings.json env vars
     client = TracingClient()
 
@@ -72,6 +72,9 @@ def search(
 @app.command("list")
 def list_experiments():
     """List available experiments."""
+    from .client import TracingClient
+    from .setup import load_settings
+
     load_settings()  # Load .claude/settings.json env vars
     client = TracingClient()
     experiments = client.list_experiments()
