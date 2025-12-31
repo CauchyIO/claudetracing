@@ -6,23 +6,8 @@
 [![CI](https://github.com/CauchyIO/claudetracing/actions/workflows/ci.yml/badge.svg)](https://github.com/CauchyIO/claudetracing/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/CauchyIO/claudetracing/branch/master/graph/badge.svg)](https://codecov.io/gh/CauchyIO/claudetracing)
 
-MLflow tracing for Claude Code sessions with Databricks integration. Automatically captures conversations, tool usage, and session metadata.
+A simple helper CLI to help you setup the MLFlow tracing in Claude Code in Databricks. While the MLFlow documentation already can set up claude code tracing for you with the command `mlflow autolog claude` this goes a step further in guiding you through the process such to make sure your experiments have the same naming convention as well as use the correct profile and prevent the use of a PAT.
 
-## Why Trace Claude Code Sessions?
-
-When Claude Code becomes part of your development workflow, visibility into how it's being used becomes valuable:
-
-- **Review past sessions** - What did Claude do while you were away? Search and replay any session to understand decisions made.
-- **Team insights** - See how your team uses Claude Code across projects. Identify patterns, common tasks, and areas for improvement.
-- **Debug failures** - When something goes wrong, trace data shows exactly which tools were called, in what order, and what inputs/outputs were involved.
-- **Cost awareness** - Track token usage and session duration to understand resource consumption.
-- **Compliance & audit** - Maintain records of AI-assisted code changes for regulated environments.
-
-## Prerequisites
-
-- Python 3.10+
-- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) installed
-- Access to a Databricks workspace
 
 ## Installation
 
@@ -64,32 +49,23 @@ traces search -f json            # Output as JSON
 traces search -f context         # LLM-optimized format
 ```
 
-## Python API
+MLflow tracing for Claude Code sessions with Databricks integration. Automatically captures conversations, tool usage, and session metadata.
 
-```python
-from claudetracing import TracingClient
+## Why Trace Claude Code Sessions?
 
-client = TracingClient()
+When Claude Code becomes part of your development workflow, visibility into how it's being used becomes valuable:
 
-# List experiments
-experiments = client.list_experiments()
+- **Review past sessions** - What did Claude do while you were away? Search and replay any session to understand decisions made.
+- **Team insights** - See how your team uses Claude Code across projects. Identify patterns, common tasks, and areas for improvement.
+- **Debug failures** - When something goes wrong, trace data shows exactly which tools were called, in what order, and what inputs/outputs were involved.
+- **Cost awareness** - Track token usage and session duration to understand resource consumption.
+- **Compliance & audit** - Maintain records of AI-assisted code changes for regulated environments.
 
-# Search traces
-traces = client.search_traces(experiment_name="my-experiment", max_results=10)
+## Prerequisites
 
-# Search by time
-traces = client.search_traces_by_time(hours=24)
-
-# Get specific trace
-trace = client.get_trace("trace-id")
-
-# Access trace data
-for trace in traces:
-    print(f"Session: {trace.info.trace_id}")
-    print(f"Tools used: {trace.get_tool_calls()}")
-    for span in trace.spans:
-        print(f"  {span.name}: {span.execution_time_ms}ms")
-```
+- Python 3.10+
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) installed
+- Access to a Databricks workspace
 
 ## What Gets Traced
 
