@@ -56,7 +56,7 @@ def enriched_stop_hook_handler() -> None:
             active_enrichments = [
                 e.strip() for e in enrichments_str.split(",") if e.strip()
             ]
-            logger.warning(
+            logger.debug(
                 "Enrichments: %r, active: %s", enrichments_str, active_enrichments
             )
 
@@ -73,7 +73,7 @@ def enriched_stop_hook_handler() -> None:
                 from mlflow.tracking import MlflowClient
 
                 client = MlflowClient()
-                logger.warning("Setting trace tags: %s", list(enrichments.keys()))
+                logger.info("Setting trace tags: %s", list(enrichments.keys()))
                 for key, value in enrichments.items():
                     client.set_trace_tag(request_id, key, value)
 
@@ -115,7 +115,7 @@ def _get_git_attributes(logger) -> dict[str, str]:
     from claudetracing.git_enrichment import get_git_metadata
 
     git_meta = get_git_metadata()
-    logger.warning("Git enrichment: %s", git_meta)
+    logger.debug("Git enrichment: %s", git_meta)
     return git_meta
 
 
@@ -123,7 +123,7 @@ def _get_files_attributes(transcript_path: str, logger) -> dict[str, str]:
     """Get modified files list as span attribute."""
     try:
         modified_files = _extract_modified_files(transcript_path)
-        logger.warning("Files enrichment: %s files", len(modified_files))
+        logger.debug("Files enrichment: %s files", len(modified_files))
         if modified_files:
             return {"files.modified": json.dumps(sorted(modified_files))}
     except Exception as e:
@@ -135,7 +135,7 @@ def _get_tokens_attributes(transcript_path: str, logger) -> dict[str, str]:
     """Get token usage statistics as span attributes."""
     try:
         usage = _extract_token_usage(transcript_path)
-        logger.warning("Tokens enrichment: %s", usage)
+        logger.debug("Tokens enrichment: %s", usage)
         return {k: str(v) for k, v in usage.items() if v > 0}
     except Exception as e:
         logger.error("Failed to get tokens enrichment: %s", e)

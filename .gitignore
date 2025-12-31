@@ -28,6 +28,7 @@ scratch/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
 
 
 # Claude Code Tracing
