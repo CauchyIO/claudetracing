@@ -110,7 +110,7 @@ def create_settings_file(
     claude_dir.mkdir(exist_ok=True)
     settings_path = claude_dir / "settings.json"
 
-    # Tracing-specific config
+    # Tracing-specific config - uses MLflow's built-in handler
     tracing_hook = {
         "type": "command",
         "command": 'uv run python -c "from mlflow.claude_code.hooks import stop_hook_handler; stop_hook_handler()"',
@@ -142,26 +142,37 @@ def create_settings_file(
         existing["environment"] = {}
     existing["environment"].update(tracing_env)
 
-    # Merge Stop hooks (append tracing hook to existing hooks)
+    # Clear enrichments on init (start fresh)
+    existing["environment"].pop("CLAUDETRACING_ENRICHMENTS", None)
+
+    # Merge Stop hooks - ensure exactly one tracing hook with default command
     if "hooks" not in existing:
         existing["hooks"] = {}
     if "Stop" not in existing["hooks"]:
         existing["hooks"]["Stop"] = []
 
-    # Check if tracing hook already exists anywhere in Stop hooks
     hook_command = tracing_hook["command"]
-    hook_exists = any(
-        hook.get("command") == hook_command
-        or any(h.get("command") == hook_command for h in hook.get("hooks", []))
-        for hook in existing["hooks"]["Stop"]
-    )
 
-    if not hook_exists:
-        # Append to existing Stop block, or create new one if empty
-        if existing["hooks"]["Stop"] and "hooks" in existing["hooks"]["Stop"][0]:
-            existing["hooks"]["Stop"][0]["hooks"].append(tracing_hook)
-        else:
-            existing["hooks"]["Stop"] = [{"hooks": [tracing_hook]}]
+    # Remove all existing tracing hooks (mlflow or claudetracing)
+    for hook_block in existing["hooks"]["Stop"]:
+        if "hooks" in hook_block:
+            hook_block["hooks"] = [
+                h
+                for h in hook_block["hooks"]
+                if "mlflow" not in h.get("command", "")
+                and "claudetracing" not in h.get("command", "")
+            ]
+
+    # Remove empty hook blocks
+    existing["hooks"]["Stop"] = [
+        hb for hb in existing["hooks"]["Stop"] if hb.get("hooks") or hb.get("command")
+    ]
+
+    # Add the default tracing hook
+    if existing["hooks"]["Stop"] and "hooks" in existing["hooks"]["Stop"][0]:
+        existing["hooks"]["Stop"][0]["hooks"].append(tracing_hook)
+    else:
+        existing["hooks"]["Stop"] = [{"hooks": [tracing_hook]}]
 
     settings_path.write_text(json.dumps(existing, indent=2))
     return settings_path
@@ -203,10 +214,11 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         signal.alarm(30)  # 30 second timeout
 
         import mlflow
+        from mlflow import get_experiment_by_name
 
         os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
         mlflow.set_tracking_uri(f"databricks://{profile}")
-        mlflow.get_experiment_by_name(experiment_path)
+        get_experiment_by_name(experiment_path)
 
         signal.alarm(0)  # Cancel timeout
         return True
@@ -223,14 +235,14 @@ def run_setup() -> int:
     storage_type = prompt_choice(
         "Where should traces be stored?",
         [
-            "Local (mlruns/ folder - no setup required)",
             "Databricks (requires workspace access)",
+            "Local (mlruns/ folder - no setup required)",
         ],
     )
 
     if storage_type == 0:
-        return setup_local()
-    return setup_databricks()
+        return setup_databricks()
+    return setup_local()
 
 
 def setup_local() -> int:

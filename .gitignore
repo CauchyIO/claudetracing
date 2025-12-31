@@ -22,8 +22,14 @@ mlflow.db
 
 # Claude Code
 .claude/
+scratch/
 
 # Caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+
+# Claude Code Tracing
+.claude/settings.local.json
+.claude/mlflow/
