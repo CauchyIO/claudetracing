@@ -131,6 +131,16 @@ When Claude Code becomes part of your development workflow, visibility into how 
 3. The hook calls MLflow's built-in Claude Code tracing to capture the session
 4. Traces are uploaded to your Databricks MLflow experiment
 
+## FAQ
+
+### Why might my traces have different metadata than my teammate's?
+
+Enrichment configuration is stored locally per-user in `.claude/settings.json`. If teammates configure different enrichments, their traces will have different tags. See [ADR-001](docs/adr/001-enrichment-consistency.md) for the design rationale and options considered.
+
+### Can I join an existing experiment with different enrichments?
+
+Currently yes, but this creates inconsistent trace data. We recommend teams align on enrichment configuration when sharing an experiment.
+
 ## License
 
 MIT
