@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import sys
 
 
@@ -86,11 +87,27 @@ def enriched_stop_hook_handler() -> None:
                 )
             )
 
-    except Exception as e:
+    except json.JSONDecodeError as e:
         from mlflow.claude_code.tracing import get_hook_response, get_logger
 
-        get_logger().error("Error in enriched Stop hook: %s", e, exc_info=True)
+        get_logger().error("Invalid JSON in hook input: %s", e)
+        print(json.dumps(get_hook_response(error=f"Invalid JSON: {e}")))
+        sys.exit(1)
+    except (FileNotFoundError, OSError) as e:
+        from mlflow.claude_code.tracing import get_hook_response, get_logger
+
+        get_logger().error("File error in Stop hook: %s", e, exc_info=True)
         print(json.dumps(get_hook_response(error=str(e))))
+        sys.exit(1)
+    except subprocess.TimeoutExpired as e:
+        from mlflow.claude_code.tracing import get_hook_response, get_logger
+
+        get_logger().error("Subprocess timeout in Stop hook: %s", e)
+        print(json.dumps(get_hook_response(error=f"Timeout: {e}")))
+        sys.exit(1)
+    except ImportError as e:
+        # MLflow or other dependency not available
+        print(json.dumps({"error": f"Missing dependency: {e}"}))
         sys.exit(1)
 
 

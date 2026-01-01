@@ -5,6 +5,13 @@ import os
 import subprocess
 from pathlib import Path
 
+# ANSI color codes
+YELLOW = "\033[33m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
 
 def load_settings() -> dict | None:
     """Load settings from .claude/settings.json and set environment variables.
@@ -35,13 +42,10 @@ def prompt(message: str, default: str | None = None) -> str:
 
 def prompt_choice(message: str, choices: list[str], default: int = 0) -> int:
     """Prompt user to choose from a list. Returns index."""
-    green = "\033[32m"
-    reset = "\033[0m"
-
     print(message)
     for i, choice in enumerate(choices):
         suffix = " (recommended)" if i == default else ""
-        print(f"  {green}[{i + 1}]{reset} {choice}{suffix}")
+        print(f"  {GREEN}[{i + 1}]{RESET} {choice}{suffix}")
 
     result = input(f"\nChoice [1-{len(choices)}] (default: {default + 1}): ").strip()
     if not result:
@@ -80,13 +84,19 @@ def get_databricks_profiles() -> list[dict]:
 
 
 def get_databricks_user(profile: str) -> str | None:
-    """Get current user's email from Databricks."""
+    """Get current user's email from Databricks.
+
+    Returns None if the command fails, with a warning printed to stderr.
+    """
     result = subprocess.run(
         ["databricks", "current-user", "me", "--profile", profile, "-o", "json"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
+        print(
+            f"{YELLOW}Warning: Could not get Databricks user: {result.stderr.strip()}{RESET}"
+        )
         return None
     data = json.loads(result.stdout)
     return data.get("userName") or data.get("user_name")
@@ -231,14 +241,6 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         return False
 
 
-# ANSI color codes
-YELLOW = "\033[33m"
-GREEN = "\033[32m"
-CYAN = "\033[36m"
-BOLD = "\033[1m"
-RESET = "\033[0m"
-
-
 def _check_and_warn_enrichment_mismatch(
     experiment_path: str, profile: str | None = None
 ) -> tuple[bool, list[str]]:
@@ -342,6 +344,18 @@ def setup_local() -> int:
     return 0
 
 
+def _authenticate_new_workspace() -> tuple[str, str | None]:
+    """Prompt for workspace URL, authenticate, and return (profile, user)."""
+    workspace = prompt(
+        "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
+    )
+    if not workspace.startswith("https://"):
+        workspace = f"https://{workspace}"
+    subprocess.run(["databricks", "auth", "login", "--host", workspace], check=True)
+    profile = workspace.replace("https://", "").split(".")[0]
+    return profile, get_databricks_user(profile)
+
+
 def setup_databricks() -> int:
     """Setup Databricks MLflow storage."""
     # Check databricks CLI
@@ -354,7 +368,9 @@ def setup_databricks() -> int:
     # Get or create profile
     profiles = get_databricks_profiles()
 
-    if profiles:
+    if not profiles:
+        profile, user = _authenticate_new_workspace()
+    else:
         choices = [f"{p['name']} ({p['host']})" for p in profiles] + [
             "Add new workspace"
         ]
@@ -364,25 +380,7 @@ def setup_databricks() -> int:
             profile = profiles[idx]["name"]
             user = get_databricks_user(profile)
         else:
-            workspace = prompt(
-                "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
-            )
-            if not workspace.startswith("https://"):
-                workspace = f"https://{workspace}"
-            subprocess.run(
-                ["databricks", "auth", "login", "--host", workspace], check=True
-            )
-            profile = workspace.replace("https://", "").split(".")[0]
-            user = get_databricks_user(profile)
-    else:
-        workspace = prompt(
-            "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
-        )
-        if not workspace.startswith("https://"):
-            workspace = f"https://{workspace}"
-        subprocess.run(["databricks", "auth", "login", "--host", workspace], check=True)
-        profile = workspace.replace("https://", "").split(".")[0]
-        user = get_databricks_user(profile)
+            profile, user = _authenticate_new_workspace()
 
     if user:
         print(f"Authenticated as: {user}")
