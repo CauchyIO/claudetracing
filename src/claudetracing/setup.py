@@ -35,12 +35,15 @@ def prompt(message: str, default: str | None = None) -> str:
 
 def prompt_choice(message: str, choices: list[str], default: int = 0) -> int:
     """Prompt user to choose from a list. Returns index."""
+    green = "\033[32m"
+    reset = "\033[0m"
+
     print(message)
     for i, choice in enumerate(choices):
-        marker = "*" if i == default else " "
-        print(f"  {marker} [{i + 1}] {choice}")
+        suffix = " (recommended)" if i == default else ""
+        print(f"  {green}[{i + 1}]{reset} {choice}{suffix}")
 
-    result = input(f"Choice [1-{len(choices)}] (default: {default + 1}): ").strip()
+    result = input(f"\nChoice [1-{len(choices)}] (default: {default + 1}): ").strip()
     if not result:
         return default
     try:

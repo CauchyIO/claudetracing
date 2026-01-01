@@ -251,9 +251,8 @@ def detect_enrichments_from_traces(
         if not experiment:
             return None
 
-        # Search for recent traces
         traces = client.search_traces(
-            experiment_names=[experiment_name],
+            locations=[experiment.experiment_id],
             max_results=max_traces,
         )
     except (MlflowException, ConnectionError, OSError) as e:
