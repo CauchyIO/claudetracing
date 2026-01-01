@@ -187,20 +187,38 @@ def create_settings_file(
     return settings_path
 
 
-def update_gitignore(project_root: Path) -> None:
-    """Add Claude Code entries to .gitignore.
+def update_gitignore(project_root: Path) -> bool:
+    """Add Claude Code entries to .gitignore if user confirms.
 
     Args:
         project_root: Project root directory
+
+    Returns:
+        True if gitignore was updated, False otherwise
     """
     gitignore = project_root / ".gitignore"
     entries = [".claude/settings.local.json", ".claude/mlflow/", "mlruns/"]
     existing = gitignore.read_text() if gitignore.exists() else ""
 
     to_add = [e for e in entries if e not in existing]
-    if to_add:
-        with open(gitignore, "a") as f:
-            f.write("\n# Claude Code Tracing\n" + "\n".join(to_add) + "\n")
+    if not to_add:
+        return False
+
+    green = "\033[32m"
+    reset = "\033[0m"
+    print("\nAdd these entries to .gitignore?")
+    for entry in to_add:
+        print(f"  - {entry}")
+    print(f"  {green}[1]{reset} Yes (recommended)")
+    print(f"  {green}[2]{reset} No")
+
+    choice = input("\nChoice [1/2] (default: 1): ").strip()
+    if choice == "2":
+        return False
+
+    with open(gitignore, "a") as f:
+        f.write("\n# Claude Code Tracing\n" + "\n".join(to_add) + "\n")
+    return True
 
 
 def verify_connection(profile: str, experiment_path: str) -> bool:
@@ -336,8 +354,8 @@ def setup_local() -> int:
         if success:
             print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
 
-    update_gitignore(project_root)
-    print("Updated .gitignore")
+    if update_gitignore(project_root):
+        print("Updated .gitignore")
 
     print("\nSetup complete! Restart Claude Code to enable tracing.")
     print("Traces will be stored locally in: mlruns/")
@@ -443,8 +461,8 @@ def setup_databricks() -> int:
             print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
 
     # Update .gitignore
-    update_gitignore(project_root)
-    print("Updated .gitignore")
+    if update_gitignore(project_root):
+        print("Updated .gitignore")
 
     print("\nSetup complete! Restart Claude Code to enable tracing.")
     print(f"Traces will be sent to: {experiment_path}")
