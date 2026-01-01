@@ -251,11 +251,12 @@ def _check_and_warn_enrichment_mismatch(
     detected = detect_enrichments_from_traces(experiment_path, profile)
 
     if detected is None:
-        print("No existing traces found - starting fresh.")
+        # Error occurred (warning already printed) or experiment doesn't exist
+        print("Could not detect existing enrichments - continuing with setup.")
         return True, []
 
-    if not detected:
-        print("Existing traces have no enrichments enabled.")
+    if len(detected) == 0:
+        print("No enrichments detected in existing traces.")
         return True, []
 
     detected_list = sorted(detected)

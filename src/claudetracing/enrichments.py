@@ -232,7 +232,7 @@ def detect_enrichments_from_traces(
         max_traces: Number of recent traces to sample
 
     Returns:
-        Set of detected enrichment names, or None if no traces found
+        Set of detected enrichment names, or None if experiment not found or error
     """
     import os
 
@@ -256,7 +256,8 @@ def detect_enrichments_from_traces(
             max_results=max_traces,
         )
         if not traces:
-            return None
+            # Experiment exists but has no traces yet
+            return set()
 
         # Detect enrichments from trace tags
         detected: set[str] = set()
@@ -271,7 +272,9 @@ def detect_enrichments_from_traces(
 
         return detected
 
-    except Exception:
+    except Exception as e:
+        # Print warning so user knows detection failed
+        print(f"\033[33mWarning: Could not check existing traces: {e}\033[0m")
         return None
 
 
