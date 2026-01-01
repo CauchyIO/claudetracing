@@ -222,7 +222,7 @@ def remove_enrichments(
 
 
 def detect_enrichments_from_traces(
-    experiment_name: str, profile: str | None = None, max_traces: int = 10
+    experiment_name: str, profile: str | None = None, max_traces: int = 5
 ) -> set[str] | None:
     """Detect which enrichments are in use by analyzing existing traces.
 
@@ -266,14 +266,25 @@ def detect_enrichments_from_traces(
 
     # Detect enrichments from trace tags
     detected: set[str] = set()
+    traces_with_tags = 0
     for trace in traces:
         tags = trace.info.tags or {}
+        if tags:
+            traces_with_tags += 1
         if any(k.startswith("git.") for k in tags):
             detected.add("git")
         if any(k.startswith("files.") for k in tags):
             detected.add("files")
         if any(k.startswith("tokens.") for k in tags):
             detected.add("tokens")
+
+    # Warn if we got traces but none had tags - likely a data download issue
+    if traces and traces_with_tags == 0:
+        print(
+            "\033[33mWarning: Found traces but none had readable tags. "
+            "Detection may be unreliable.\033[0m"
+        )
+        return None  # Signal unreliable detection
 
     return detected
 

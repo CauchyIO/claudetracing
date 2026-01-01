@@ -253,7 +253,7 @@ def _check_and_warn_enrichment_mismatch(
     """
     from claudetracing.enrichments import detect_enrichments_from_traces
 
-    print("Checking existing traces for enrichment configuration...")
+    print("Checking last 5 traces for enrichment configuration...")
     detected = detect_enrichments_from_traces(experiment_path, profile)
 
     if detected is None:
