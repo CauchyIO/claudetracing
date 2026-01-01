@@ -31,7 +31,6 @@ ENRICHMENTS: dict[str, Enrichment] = {
             "git.commit_id - Full commit SHA at session start",
             "git.branch - Current branch name",
             "git.remote_url - Origin remote URL",
-            "git.repo_name - Repository name (org/repo)",
         ],
     ),
     "files": Enrichment(
