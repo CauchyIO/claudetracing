@@ -225,6 +225,41 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         return False
 
 
+def _check_and_warn_enrichment_mismatch(
+    experiment_path: str, profile: str | None = None
+) -> bool:
+    """Check for enrichment mismatch and warn user.
+
+    Args:
+        experiment_path: MLflow experiment path
+        profile: Databricks profile (None for local)
+
+    Returns:
+        True to continue setup, False to cancel
+    """
+    from claudetracing.enrichments import detect_enrichments_from_traces
+
+    print("Checking existing traces for enrichment configuration...")
+    detected = detect_enrichments_from_traces(experiment_path, profile)
+
+    if detected is None:
+        print("No existing traces found - starting fresh.")
+        return True
+
+    if not detected:
+        print("Existing traces have no enrichments enabled.")
+        return True
+
+    detected_str = ", ".join(sorted(detected))
+    print(f"\nExisting traces use enrichments: {detected_str}")
+    print("\nYour setup will start with no enrichments enabled.")
+    print("To match existing traces, run after setup:")
+    print(f"  traces enrichment add {' '.join(sorted(detected))}")
+
+    confirm = input("\nContinue with setup? [Y/n]: ").strip().lower()
+    return confirm != "n"
+
+
 def run_setup() -> int:
     """Run the interactive setup process."""
     print("\n=== Claude Code Tracing Setup ===\n")
@@ -249,6 +284,11 @@ def setup_local() -> int:
     project_name = project_root.name
 
     exp_name = prompt("Experiment name", default=project_name)
+
+    # Check for enrichment consistency with existing traces
+    if not _check_and_warn_enrichment_mismatch(exp_name, profile=None):
+        print("Setup cancelled.")
+        return 1
 
     settings_path = create_settings_file(
         profile=None,
@@ -345,6 +385,11 @@ def setup_databricks() -> int:
         return 1
 
     print("Connection verified!")
+
+    # Check for enrichment consistency with existing traces
+    if not _check_and_warn_enrichment_mismatch(experiment_path, profile):
+        print("Setup cancelled.")
+        return 1
 
     # Create settings.json
     project_root = Path.cwd()

@@ -135,11 +135,28 @@ When Claude Code becomes part of your development workflow, visibility into how 
 
 ### Why might my traces have different metadata than my teammate's?
 
-Enrichment configuration is stored locally per-user in `.claude/settings.json`. If teammates configure different enrichments, their traces will have different tags. See [ADR-001](docs/adr/001-enrichment-consistency.md) for the design rationale and options considered.
+Enrichment configuration is stored locally per-user in `.claude/settings.json`. If teammates configure different enrichments, their traces will have different tags. See [ADR-001](docs/adr/001-enrichment-consistency.md) for the design rationale.
 
-### Can I join an existing experiment with different enrichments?
+### What happens when I join an existing experiment?
 
-Currently yes, but this creates inconsistent trace data. We recommend teams align on enrichment configuration when sharing an experiment.
+During `traces init`, we check existing traces for enrichment patterns. If enrichments are detected, you'll see a warning like:
+
+```
+Existing traces use enrichments: files, git, tokens
+
+Your setup will start with no enrichments enabled.
+To match existing traces, run after setup:
+  traces enrichment add files git tokens
+```
+
+You can continue with different enrichments if you have a reason, but matching is recommended for consistent trace data.
+
+### Why warn instead of auto-configuring enrichments?
+
+We chose advisory warnings over enforcement because:
+- Teams may intentionally use different enrichments for different use cases
+- Some users may not have all enrichments available (e.g., no git repo)
+- Respecting user autonomy while surfacing potential issues
 
 ## License
 

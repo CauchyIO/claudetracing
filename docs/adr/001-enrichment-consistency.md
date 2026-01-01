@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -76,15 +76,34 @@ During `traces init` or session start, check if local config differs from experi
 
 ## Decision
 
-**[PENDING - To be filled after decision]**
+We chose **Option C (Warn on Mismatch)** combined with **Option A's detection mechanism**.
+
+During `traces init`, we:
+1. Query recent traces from the experiment to detect which enrichments are in use
+2. If enrichments are detected, warn the user and show the command to match
+3. Let the user decide whether to continue or cancel
+
+This approach:
+- Respects user autonomy - they can proceed with different enrichments if they have a reason
+- Surfaces the issue early - during setup, not after traces are already inconsistent
+- Provides actionable guidance - shows exactly which command to run to match
+
+We rejected strict enforcement (auto-configuring or blocking) because:
+- Teams may intentionally use different enrichments for different use cases
+- Some users may not have all enrichments available (e.g., no git repo)
+- Advisory warnings are sufficient for coordination without being restrictive
 
 ## Consequences
 
-**[PENDING - To be filled after decision]**
+- Users joining an existing experiment will see a warning if their config differs
+- The warning includes a ready-to-run command to match existing enrichments
+- Users can ignore the warning if they have a valid reason
+- Trace consistency is improved but not guaranteed
+- No changes to the MLflow schema or experiment metadata required
 
 ---
 
 ## References
 
-- Related discussion: Enrichment system design
-- Implementation: `src/claudetracing/enrichments.py`
+- Implementation: `src/claudetracing/enrichments.py` (`detect_enrichments_from_traces`, `check_enrichment_consistency`)
+- Integration: `src/claudetracing/setup.py` (`_check_and_warn_enrichment_mismatch`)

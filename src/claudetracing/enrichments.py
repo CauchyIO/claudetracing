@@ -219,3 +219,101 @@ def remove_enrichments(
         msg += f" (not active: {', '.join(not_active)})"
     msg += ". Restart Claude Code to apply."
     return True, msg
+
+
+def detect_enrichments_from_traces(
+    experiment_name: str, profile: str | None = None, max_traces: int = 10
+) -> set[str] | None:
+    """Detect which enrichments are in use by analyzing existing traces.
+
+    Args:
+        experiment_name: MLflow experiment name/path
+        profile: Databricks profile (None for local)
+        max_traces: Number of recent traces to sample
+
+    Returns:
+        Set of detected enrichment names, or None if no traces found
+    """
+    import os
+
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        # Configure MLflow
+        if profile:
+            os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
+            mlflow.set_tracking_uri(f"databricks://{profile}")
+
+        client = MlflowClient()
+        experiment = client.get_experiment_by_name(experiment_name)
+        if not experiment:
+            return None
+
+        # Search for recent traces
+        traces = client.search_traces(
+            experiment_ids=[experiment.experiment_id],
+            max_results=max_traces,
+        )
+        if not traces:
+            return None
+
+        # Detect enrichments from trace tags
+        detected: set[str] = set()
+        for trace in traces:
+            tags = trace.info.tags or {}
+            if any(k.startswith("git.") for k in tags):
+                detected.add("git")
+            if any(k.startswith("files.") for k in tags):
+                detected.add("files")
+            if any(k.startswith("tokens.") for k in tags):
+                detected.add("tokens")
+
+        return detected
+
+    except Exception:
+        return None
+
+
+@dataclass
+class EnrichmentMismatch:
+    """Result of enrichment consistency check."""
+
+    detected: set[str]
+    local: set[str]
+
+    @property
+    def missing_locally(self) -> set[str]:
+        """Enrichments used in traces but not configured locally."""
+        return self.detected - self.local
+
+    @property
+    def extra_locally(self) -> set[str]:
+        """Enrichments configured locally but not in existing traces."""
+        return self.local - self.detected
+
+
+def check_enrichment_consistency(
+    experiment_name: str,
+    local_enrichments: list[str],
+    profile: str | None = None,
+) -> EnrichmentMismatch | None:
+    """Check if local enrichment config matches what's in existing traces.
+
+    Args:
+        experiment_name: MLflow experiment name/path
+        local_enrichments: List of locally configured enrichments
+        profile: Databricks profile (None for local)
+
+    Returns:
+        EnrichmentMismatch if there's a discrepancy, None if consistent or no traces
+    """
+    detected = detect_enrichments_from_traces(experiment_name, profile)
+    if detected is None:
+        return None  # No traces yet, nothing to compare
+
+    local = set(local_enrichments)
+    if detected == local:
+        return None  # Consistent
+
+    return EnrichmentMismatch(detected=detected, local=local)

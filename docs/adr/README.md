@@ -6,7 +6,7 @@ This folder contains Architecture Decision Records (ADRs) documenting significan
 
 | ID | Title | Status |
 |----|-------|--------|
-| [001](001-enrichment-consistency.md) | Enrichment Configuration Consistency | Proposed |
+| [001](001-enrichment-consistency.md) | Enrichment Configuration Consistency | Accepted |
 
 ## Creating a New ADR
 
