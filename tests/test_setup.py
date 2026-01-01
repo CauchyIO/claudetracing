@@ -148,7 +148,7 @@ def test_does_not_duplicate_tracing_hook():
 
 
 def test_gitignore_updated():
-    """Test that .gitignore is updated with Claude Code entries."""
+    """Test that .gitignore is updated with Claude Code entries when user confirms."""
     with tempfile.TemporaryDirectory() as tmpdir:
         os.chdir(tmpdir)
 
@@ -159,8 +159,10 @@ def test_gitignore_updated():
 
         gitignore_path.write_text("*.pyc\n")
 
-        update_gitignore(project_root)
+        with patch("builtins.input", return_value="1"):
+            result = update_gitignore(project_root)
 
+        assert result is True
         content = gitignore_path.read_text()
         assert ".claude/settings.local.json" in content
         assert ".claude/mlflow/" in content
@@ -178,10 +180,15 @@ def test_gitignore_not_duplicated():
         project_root = Path(tmpdir)
         gitignore_path = project_root / ".gitignore"
 
-        gitignore_path.write_text(".claude/settings.local.json\nmlruns/\n")
+        # Already has all entries
+        gitignore_path.write_text(
+            ".claude/settings.local.json\n.claude/mlflow/\nmlruns/\n"
+        )
 
-        update_gitignore(project_root)
+        # Should return False without prompting since nothing to add
+        result = update_gitignore(project_root)
 
+        assert result is False
         content = gitignore_path.read_text()
         assert content.count(".claude/settings.local.json") == 1
         assert content.count("mlruns/") == 1

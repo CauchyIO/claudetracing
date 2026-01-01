@@ -49,6 +49,56 @@ traces search -f json            # Output as JSON
 traces search -f context         # LLM-optimized format
 ```
 
+## Enrichments
+
+Enrichments add extra metadata to your traces. They are optional and can be enabled per-project. Multiple enrichments can be active simultaneously.
+
+### Available Enrichments
+
+| Name | Description |
+|------|-------------|
+| `git` | Adds git repository context: commit ID, branch, remote URL, repo name |
+| `files` | Adds list of files modified (written/edited) during the session |
+| `tokens` | Adds token usage statistics including cache metrics |
+
+### Managing Enrichments
+
+```bash
+traces enrichment list              # List available enrichments
+traces enrichment info git          # Show details about an enrichment
+traces enrichment add git files     # Enable multiple enrichments
+traces enrichment remove tokens     # Disable an enrichment
+```
+
+After adding or removing enrichments, restart Claude Code to apply the changes.
+
+### Git Enrichment
+
+Correlate traces with specific commits and branches:
+
+- `git.commit_id` - Full commit SHA
+- `git.branch` - Current branch name
+- `git.remote_url` - Origin remote URL
+- `git.repo_name` - Repository name (e.g., `org/repo`)
+
+### Files Enrichment
+
+Track which files were modified during the session:
+
+- `files.modified` - JSON array of file paths that were written or edited
+
+### Tokens Enrichment
+
+Monitor token consumption and cache efficiency:
+
+- `tokens.input` - Total input tokens
+- `tokens.output` - Total output tokens
+- `tokens.cache_read` - Tokens read from prompt cache
+- `tokens.cache_creation` - Tokens written to prompt cache
+- `tokens.total` - Total tokens (input + output)
+
+---
+
 MLflow tracing for Claude Code sessions with Databricks integration. Automatically captures conversations, tool usage, and session metadata.
 
 ## Why Trace Claude Code Sessions?
@@ -80,6 +130,35 @@ When Claude Code becomes part of your development workflow, visibility into how 
 2. This configures a Stop hook that runs when Claude Code sessions end
 3. The hook calls MLflow's built-in Claude Code tracing to capture the session
 4. Traces are uploaded to your Databricks MLflow experiment
+
+## FAQ
+
+### Why might my traces have different metadata than my teammate's?
+
+Enrichment configuration is stored locally per-user in `.claude/settings.json`. If teammates configure different enrichments, their traces will have different tags. See [ADR-001](docs/adr/001-enrichment-consistency.md) for the design rationale.
+
+### What happens when I join an existing experiment?
+
+During `traces init`, we check existing traces for enrichment patterns. If enrichments are detected, you'll see:
+
+```
+Enrichment mismatch detected
+Existing traces use: files, git, tokens
+
+Options:
+  [1] Match existing enrichments (recommended)
+  [2] Continue without enrichments
+  [3] Cancel setup
+```
+
+Choosing option 1 automatically enables the matching enrichments.
+
+### Why warn instead of auto-configuring enrichments?
+
+We chose advisory warnings over enforcement because:
+- Teams may intentionally use different enrichments for different use cases
+- Some users may not have all enrichments available (e.g., no git repo)
+- Respecting user autonomy while surfacing potential issues
 
 ## License
 
