@@ -38,7 +38,8 @@ ENRICHMENTS: dict[str, Enrichment] = {
         name="files",
         description="Adds list of files modified during the session",
         tags=[
-            "files.modified - JSON array of file paths written or edited",
+            "files.modified - JSON array of filenames written or edited (truncated to fit)",
+            "files.count - Total number of unique files modified",
         ],
     ),
     "tokens": Enrichment(

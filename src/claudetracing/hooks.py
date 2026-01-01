@@ -119,12 +119,39 @@ def _get_git_attributes(logger) -> dict[str, str]:
 
 
 def _get_files_attributes(transcript_path: str, logger) -> dict[str, str]:
-    """Get modified files list as span attribute."""
+    """Get modified files list as span attribute.
+
+    MLflow trace tags have a 255-byte limit, so we truncate if needed.
+    """
+    MAX_TAG_BYTES = 250  # Leave some margin below 255
+
     try:
         modified_files = _extract_modified_files(transcript_path)
         logger.debug("Files enrichment: %s files", len(modified_files))
-        if modified_files:
-            return {"files.modified": json.dumps(sorted(modified_files))}
+        if not modified_files:
+            return {}
+
+        # Use just filenames to save space
+        from pathlib import Path
+
+        filenames = sorted(set(Path(f).name for f in modified_files))
+        total_count = len(filenames)
+
+        # Truncate list until it fits
+        while filenames:
+            if len(filenames) < total_count:
+                value = json.dumps(
+                    filenames + [f"+{total_count - len(filenames)} more"]
+                )
+            else:
+                value = json.dumps(filenames)
+
+            if len(value.encode("utf-8")) <= MAX_TAG_BYTES:
+                return {"files.modified": value, "files.count": str(total_count)}
+            filenames = filenames[:-1]
+
+        # Fallback: just the count
+        return {"files.count": str(total_count)}
     except Exception as e:
         logger.error("Failed to get files enrichment: %s", e)
     return {}
