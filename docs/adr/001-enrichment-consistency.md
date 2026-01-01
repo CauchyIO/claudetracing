@@ -80,8 +80,11 @@ We chose **Option C (Warn on Mismatch)** combined with **Option A's detection me
 
 During `traces init`, we:
 1. Query recent traces from the experiment to detect which enrichments are in use
-2. If enrichments are detected, warn the user and show the command to match
-3. Let the user decide whether to continue or cancel
+2. If enrichments are detected, present the user with options:
+   - Match existing enrichments (auto-enables them)
+   - Continue without enrichments
+   - Cancel setup
+3. If the user chooses to match, enrichments are automatically enabled
 
 This approach:
 - Respects user autonomy - they can proceed with different enrichments if they have a reason

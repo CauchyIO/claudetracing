@@ -225,17 +225,25 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         return False
 
 
+# ANSI color codes
+YELLOW = "\033[33m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+
 def _check_and_warn_enrichment_mismatch(
     experiment_path: str, profile: str | None = None
-) -> bool:
-    """Check for enrichment mismatch and warn user.
+) -> tuple[bool, list[str]]:
+    """Check for enrichment mismatch and prompt user.
 
     Args:
         experiment_path: MLflow experiment path
         profile: Databricks profile (None for local)
 
     Returns:
-        True to continue setup, False to cancel
+        Tuple of (continue_setup, enrichments_to_add)
     """
     from claudetracing.enrichments import detect_enrichments_from_traces
 
@@ -244,20 +252,31 @@ def _check_and_warn_enrichment_mismatch(
 
     if detected is None:
         print("No existing traces found - starting fresh.")
-        return True
+        return True, []
 
     if not detected:
         print("Existing traces have no enrichments enabled.")
-        return True
+        return True, []
 
-    detected_str = ", ".join(sorted(detected))
-    print(f"\nExisting traces use enrichments: {detected_str}")
-    print("\nYour setup will start with no enrichments enabled.")
-    print("To match existing traces, run after setup:")
-    print(f"  traces enrichment add {' '.join(sorted(detected))}")
+    detected_list = sorted(detected)
+    detected_str = ", ".join(detected_list)
 
-    confirm = input("\nContinue with setup? [Y/n]: ").strip().lower()
-    return confirm != "n"
+    print(f"\n{YELLOW}{BOLD}Enrichment mismatch detected{RESET}")
+    print(f"Existing traces use: {CYAN}{detected_str}{RESET}")
+    print("\nOptions:")
+    print(f"  {GREEN}[1]{RESET} Match existing enrichments (recommended)")
+    print(f"  {GREEN}[2]{RESET} Continue without enrichments")
+    print(f"  {GREEN}[3]{RESET} Cancel setup")
+
+    choice = input("\nChoice [1/2/3] (default: 1): ").strip()
+
+    if choice == "3":
+        return False, []
+    elif choice == "2":
+        return True, []
+    else:
+        # Default to matching (option 1)
+        return True, detected_list
 
 
 def run_setup() -> int:
@@ -286,7 +305,10 @@ def setup_local() -> int:
     exp_name = prompt("Experiment name", default=project_name)
 
     # Check for enrichment consistency with existing traces
-    if not _check_and_warn_enrichment_mismatch(exp_name, profile=None):
+    continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
+        exp_name, profile=None
+    )
+    if not continue_setup:
         print("Setup cancelled.")
         return 1
 
@@ -296,6 +318,14 @@ def setup_local() -> int:
         project_root=project_root,
     )
     print(f"Created {settings_path.relative_to(project_root)}")
+
+    # Add enrichments if user chose to match
+    if enrichments_to_add:
+        from claudetracing.enrichments import add_enrichments
+
+        success, msg = add_enrichments(enrichments_to_add, project_root)
+        if success:
+            print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
 
     update_gitignore(project_root)
     print("Updated .gitignore")
@@ -387,7 +417,10 @@ def setup_databricks() -> int:
     print("Connection verified!")
 
     # Check for enrichment consistency with existing traces
-    if not _check_and_warn_enrichment_mismatch(experiment_path, profile):
+    continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
+        experiment_path, profile
+    )
+    if not continue_setup:
         print("Setup cancelled.")
         return 1
 
@@ -395,6 +428,14 @@ def setup_databricks() -> int:
     project_root = Path.cwd()
     settings_path = create_settings_file(profile, experiment_path, project_root)
     print(f"Created {settings_path.relative_to(project_root)}")
+
+    # Add enrichments if user chose to match
+    if enrichments_to_add:
+        from claudetracing.enrichments import add_enrichments
+
+        success, msg = add_enrichments(enrichments_to_add, project_root)
+        if success:
+            print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
 
     # Update .gitignore
     update_gitignore(project_root)

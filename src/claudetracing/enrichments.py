@@ -252,7 +252,7 @@ def detect_enrichments_from_traces(
 
         # Search for recent traces
         traces = client.search_traces(
-            experiment_ids=[experiment.experiment_id],
+            experiment_names=[experiment_name],
             max_results=max_traces,
         )
         if not traces:

@@ -139,17 +139,19 @@ Enrichment configuration is stored locally per-user in `.claude/settings.json`. 
 
 ### What happens when I join an existing experiment?
 
-During `traces init`, we check existing traces for enrichment patterns. If enrichments are detected, you'll see a warning like:
+During `traces init`, we check existing traces for enrichment patterns. If enrichments are detected, you'll see:
 
 ```
-Existing traces use enrichments: files, git, tokens
+Enrichment mismatch detected
+Existing traces use: files, git, tokens
 
-Your setup will start with no enrichments enabled.
-To match existing traces, run after setup:
-  traces enrichment add files git tokens
+Options:
+  [1] Match existing enrichments (recommended)
+  [2] Continue without enrichments
+  [3] Cancel setup
 ```
 
-You can continue with different enrichments if you have a reason, but matching is recommended for consistent trace data.
+Choosing option 1 automatically enables the matching enrichments.
 
 ### Why warn instead of auto-configuring enrichments?
 
