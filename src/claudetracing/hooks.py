@@ -100,13 +100,10 @@ def _get_enrichments_from_settings() -> str:
     import json as json_module
 
     settings_path = Path.cwd() / ".claude" / "settings.json"
-    if settings_path.exists():
-        try:
-            settings = json_module.loads(settings_path.read_text())
-            return settings.get("environment", {}).get("CLAUDETRACING_ENRICHMENTS", "")
-        except Exception:
-            pass
-    return ""
+    if not settings_path.exists():
+        return ""
+    settings = json_module.loads(settings_path.read_text())
+    return settings.get("environment", {}).get("CLAUDETRACING_ENRICHMENTS", "")
 
 
 def _get_git_attributes(logger) -> dict[str, str]:
@@ -125,80 +122,67 @@ def _get_files_attributes(transcript_path: str, logger) -> dict[str, str]:
     """
     MAX_TAG_BYTES = 250  # Leave some margin below 255
 
-    try:
-        modified_files = _extract_modified_files(transcript_path)
-        logger.debug("Files enrichment: %s files", len(modified_files))
-        if not modified_files:
-            return {}
+    modified_files = _extract_modified_files(transcript_path)
+    logger.debug("Files enrichment: %s files", len(modified_files))
+    if not modified_files:
+        return {}
 
-        # Use just filenames to save space
-        from pathlib import Path
+    # Use just filenames to save space
+    from pathlib import Path
 
-        filenames = sorted(set(Path(f).name for f in modified_files))
-        total_count = len(filenames)
+    filenames = sorted(set(Path(f).name for f in modified_files))
+    total_count = len(filenames)
 
-        # Truncate list until it fits
-        while filenames:
-            if len(filenames) < total_count:
-                value = json.dumps(
-                    filenames + [f"+{total_count - len(filenames)} more"]
-                )
-            else:
-                value = json.dumps(filenames)
+    # Truncate list until it fits
+    while filenames:
+        if len(filenames) < total_count:
+            value = json.dumps(filenames + [f"+{total_count - len(filenames)} more"])
+        else:
+            value = json.dumps(filenames)
 
-            if len(value.encode("utf-8")) <= MAX_TAG_BYTES:
-                return {"files.modified": value, "files.count": str(total_count)}
-            filenames = filenames[:-1]
+        if len(value.encode("utf-8")) <= MAX_TAG_BYTES:
+            return {"files.modified": value, "files.count": str(total_count)}
+        filenames = filenames[:-1]
 
-        # Fallback: just the count
-        return {"files.count": str(total_count)}
-    except Exception as e:
-        logger.error("Failed to get files enrichment: %s", e)
-    return {}
+    # Fallback: just the count
+    return {"files.count": str(total_count)}
 
 
 def _get_tokens_attributes(transcript_path: str, logger) -> dict[str, str]:
     """Get token usage statistics as span attributes."""
-    try:
-        usage = _extract_token_usage(transcript_path)
-        logger.debug("Tokens enrichment: %s", usage)
-        return {k: str(v) for k, v in usage.items() if v > 0}
-    except Exception as e:
-        logger.error("Failed to get tokens enrichment: %s", e)
-    return {}
+    usage = _extract_token_usage(transcript_path)
+    logger.debug("Tokens enrichment: %s", usage)
+    return {k: str(v) for k, v in usage.items() if v > 0}
 
 
 def _extract_modified_files(transcript_path: str) -> set[str]:
     """Extract file paths from Write and Edit tool calls in transcript."""
     modified = set()
 
-    try:
-        with open(transcript_path, encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
+    with open(transcript_path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            msg = entry.get("message", {})
+            content = msg.get("content", [])
+
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                if block.get("type") != "tool_use":
                     continue
-                entry = json.loads(line)
-                msg = entry.get("message", {})
-                content = msg.get("content", [])
 
-                if not isinstance(content, list):
+                tool_name = block.get("name", "")
+                # Only include Write and Edit (modified files)
+                if tool_name not in ("Write", "Edit"):
                     continue
 
-                for block in content:
-                    if block.get("type") != "tool_use":
-                        continue
-
-                    tool_name = block.get("name", "")
-                    # Only include Write and Edit (modified files)
-                    if tool_name not in ("Write", "Edit"):
-                        continue
-
-                    inputs = block.get("input", {})
-                    file_path = inputs.get("file_path")
-                    if file_path:
-                        modified.add(file_path)
-    except Exception:
-        pass
+                inputs = block.get("input", {})
+                file_path = inputs.get("file_path")
+                if file_path:
+                    modified.add(file_path)
 
     return modified
 
@@ -213,27 +197,24 @@ def _extract_token_usage(transcript_path: str) -> dict[str, int]:
         "tokens.total": 0,
     }
 
-    try:
-        with open(transcript_path, encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                entry = json.loads(line)
+    with open(transcript_path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
 
-                # Token usage might be in different locations depending on format
-                usage = entry.get("usage", {})
-                if not usage:
-                    # Try nested in message
-                    usage = entry.get("message", {}).get("usage", {})
+            # Token usage might be in different locations depending on format
+            usage = entry.get("usage", {})
+            if not usage:
+                # Try nested in message
+                usage = entry.get("message", {}).get("usage", {})
 
-                totals["tokens.input"] += usage.get("input_tokens", 0)
-                totals["tokens.output"] += usage.get("output_tokens", 0)
-                totals["tokens.cache_read"] += usage.get("cache_read_input_tokens", 0)
-                totals["tokens.cache_creation"] += usage.get(
-                    "cache_creation_input_tokens", 0
-                )
-    except Exception:
-        pass
+            totals["tokens.input"] += usage.get("input_tokens", 0)
+            totals["tokens.output"] += usage.get("output_tokens", 0)
+            totals["tokens.cache_read"] += usage.get("cache_read_input_tokens", 0)
+            totals["tokens.cache_creation"] += usage.get(
+                "cache_creation_input_tokens", 0
+            )
 
     totals["tokens.total"] = totals["tokens.input"] + totals["tokens.output"]
     return totals

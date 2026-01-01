@@ -4,7 +4,12 @@ import subprocess
 
 
 def get_git_metadata(cwd: str | None = None) -> dict[str, str]:
-    """Capture git metadata from the current working directory."""
+    """Capture git metadata from the current working directory.
+
+    Raises:
+        FileNotFoundError: If git is not installed
+        subprocess.TimeoutExpired: If git command takes too long
+    """
     metadata = {}
 
     commands = {
@@ -14,13 +19,8 @@ def get_git_metadata(cwd: str | None = None) -> dict[str, str]:
     }
 
     for key, cmd in commands.items():
-        try:
-            result = subprocess.run(
-                cmd, cwd=cwd, capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                metadata[key] = result.stdout.strip()
-        except Exception:
-            pass
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            metadata[key] = result.stdout.strip()
 
     return metadata

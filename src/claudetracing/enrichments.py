@@ -236,15 +236,16 @@ def detect_enrichments_from_traces(
     """
     import os
 
+    import mlflow
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+
+    # Configure MLflow
+    if profile:
+        os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
+        mlflow.set_tracking_uri(f"databricks://{profile}")
+
     try:
-        import mlflow
-        from mlflow.tracking import MlflowClient
-
-        # Configure MLflow
-        if profile:
-            os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
-            mlflow.set_tracking_uri(f"databricks://{profile}")
-
         client = MlflowClient()
         experiment = client.get_experiment_by_name(experiment_name)
         if not experiment:
@@ -255,27 +256,27 @@ def detect_enrichments_from_traces(
             experiment_names=[experiment_name],
             max_results=max_traces,
         )
-        if not traces:
-            # Experiment exists but has no traces yet
-            return set()
-
-        # Detect enrichments from trace tags
-        detected: set[str] = set()
-        for trace in traces:
-            tags = trace.info.tags or {}
-            if any(k.startswith("git.") for k in tags):
-                detected.add("git")
-            if any(k.startswith("files.") for k in tags):
-                detected.add("files")
-            if any(k.startswith("tokens.") for k in tags):
-                detected.add("tokens")
-
-        return detected
-
-    except Exception as e:
-        # Print warning so user knows detection failed
+    except (MlflowException, ConnectionError, OSError) as e:
+        # Print warning for connection/API failures during setup
         print(f"\033[33mWarning: Could not check existing traces: {e}\033[0m")
         return None
+
+    if not traces:
+        # Experiment exists but has no traces yet
+        return set()
+
+    # Detect enrichments from trace tags
+    detected: set[str] = set()
+    for trace in traces:
+        tags = trace.info.tags or {}
+        if any(k.startswith("git.") for k in tags):
+            detected.add("git")
+        if any(k.startswith("files.") for k in tags):
+            detected.add("files")
+        if any(k.startswith("tokens.") for k in tags):
+            detected.add("tokens")
+
+    return detected
 
 
 @dataclass

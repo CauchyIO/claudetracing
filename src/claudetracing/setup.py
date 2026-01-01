@@ -78,17 +78,15 @@ def get_databricks_profiles() -> list[dict]:
 
 def get_databricks_user(profile: str) -> str | None:
     """Get current user's email from Databricks."""
-    try:
-        result = subprocess.run(
-            ["databricks", "current-user", "me", "--profile", profile, "-o", "json"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        data = json.loads(result.stdout)
-        return data.get("userName") or data.get("user_name")
-    except Exception:
+    result = subprocess.run(
+        ["databricks", "current-user", "me", "--profile", profile, "-o", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
         return None
+    data = json.loads(result.stdout)
+    return data.get("userName") or data.get("user_name")
 
 
 def create_settings_file(
@@ -201,8 +199,15 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
 
     Returns:
         True if connection succeeded
+
+    Raises:
+        Any unexpected exception - only catches connection/auth failures
     """
     import signal
+
+    import mlflow
+    from mlflow import get_experiment_by_name
+    from mlflow.exceptions import MlflowException
 
     def timeout_handler(signum, frame):
         raise TimeoutError("Connection timed out")
@@ -211,17 +216,15 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(30)  # 30 second timeout
 
-        import mlflow
-        from mlflow import get_experiment_by_name
-
         os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
         mlflow.set_tracking_uri(f"databricks://{profile}")
         get_experiment_by_name(experiment_path)
 
         signal.alarm(0)  # Cancel timeout
         return True
-    except (TimeoutError, Exception):
+    except (TimeoutError, MlflowException, ConnectionError, OSError) as e:
         signal.alarm(0)
+        print(f"Connection failed: {e}")
         return False
 
 
@@ -341,7 +344,7 @@ def setup_databricks() -> int:
     # Check databricks CLI
     try:
         subprocess.run(["databricks", "--version"], capture_output=True, check=True)
-    except Exception:
+    except FileNotFoundError:
         print("Error: Databricks CLI not found. Install with: brew install databricks")
         return 1
 
