@@ -151,8 +151,6 @@ def create_settings_file(
     if "Stop" not in existing["hooks"]:
         existing["hooks"]["Stop"] = []
 
-    hook_command = tracing_hook["command"]
-
     # Remove all existing tracing hooks (mlflow or claudetracing)
     for hook_block in existing["hooks"]["Stop"]:
         if "hooks" in hook_block:

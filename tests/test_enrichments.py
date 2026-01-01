@@ -4,12 +4,9 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from claudetracing.enrichments import (
     DEFAULT_HOOK_COMMAND,
     ENRICHED_HOOK_COMMAND,
-    ENRICHMENTS,
     add_enrichments,
     get_active_enrichments,
     get_enrichment,
@@ -86,16 +83,22 @@ class TestUpdateHookCommand:
     def test_switch_to_enriched_hook(self):
         settings = {
             "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": DEFAULT_HOOK_COMMAND}]}]
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": DEFAULT_HOOK_COMMAND}]}
+                ]
             }
         }
         result = _update_hook_command(settings, use_enriched=True)
-        assert result["hooks"]["Stop"][0]["hooks"][0]["command"] == ENRICHED_HOOK_COMMAND
+        assert (
+            result["hooks"]["Stop"][0]["hooks"][0]["command"] == ENRICHED_HOOK_COMMAND
+        )
 
     def test_switch_to_default_hook(self):
         settings = {
             "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": ENRICHED_HOOK_COMMAND}]}]
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": ENRICHED_HOOK_COMMAND}]}
+                ]
             }
         }
         result = _update_hook_command(settings, use_enriched=False)
@@ -103,9 +106,7 @@ class TestUpdateHookCommand:
 
     def test_flat_hook_structure(self):
         settings = {
-            "hooks": {
-                "Stop": [{"type": "command", "command": DEFAULT_HOOK_COMMAND}]
-            }
+            "hooks": {"Stop": [{"type": "command", "command": DEFAULT_HOOK_COMMAND}]}
         }
         result = _update_hook_command(settings, use_enriched=True)
         assert result["hooks"]["Stop"][0]["command"] == ENRICHED_HOOK_COMMAND
@@ -224,7 +225,10 @@ class TestRemoveEnrichments:
             assert success
             loaded = load_settings(project_root)
             # Should switch back to default hook
-            assert DEFAULT_HOOK_COMMAND in loaded["hooks"]["Stop"][0]["hooks"][0]["command"]
+            assert (
+                DEFAULT_HOOK_COMMAND
+                in loaded["hooks"]["Stop"][0]["hooks"][0]["command"]
+            )
 
     def test_remove_invalid_enrichment(self):
         with tempfile.TemporaryDirectory() as tmpdir:

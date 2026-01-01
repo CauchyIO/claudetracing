@@ -11,7 +11,6 @@ def enriched_stop_hook_handler() -> None:
     Reads CLAUDETRACING_ENRICHMENTS env var to determine which enrichments to apply.
     Uses MlflowClient.set_trace_tag() to attach tags to the specific trace.
     """
-    import mlflow
     from mlflow.claude_code.tracing import (
         get_hook_response,
         get_logger,

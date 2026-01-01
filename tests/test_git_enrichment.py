@@ -2,8 +2,6 @@
 
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from claudetracing.git_enrichment import (
     _git_cmd,
     is_git_repo,
@@ -57,12 +55,16 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
 
                 assert metadata["git.commit_id"] == "abc123def456"
                 assert metadata["git.branch"] == "main"
-                assert metadata["git.remote_url"] == "https://github.com/myorg/myrepo.git"
+                assert (
+                    metadata["git.remote_url"] == "https://github.com/myorg/myrepo.git"
+                )
                 assert metadata["git.repo_name"] == "myorg/myrepo"
 
     def test_ssh_remote_url(self):
@@ -76,7 +78,9 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
 
                 assert metadata["git.repo_name"] == "myorg/myrepo"
@@ -92,7 +96,9 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
 
                 assert metadata["git.repo_name"] == "my-project"
@@ -109,7 +115,9 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
 
                 assert "git.commit_id" in metadata
@@ -128,7 +136,9 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
                 assert metadata["git.repo_name"] == "myorg/myrepo"
 
@@ -143,7 +153,9 @@ class TestGetGitMetadata:
             return commands.get(tuple(args))
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", side_effect=mock_git_cmd
+            ):
                 metadata = get_git_metadata()
                 assert metadata["git.repo_name"] == "myorg/myrepo"
 
@@ -165,7 +177,9 @@ class TestGetRecentCommits:
         )
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", return_value=log_output):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", return_value=log_output
+            ):
                 commits = get_recent_commits(n=2)
 
                 assert len(commits) == 2
@@ -176,10 +190,14 @@ class TestGetRecentCommits:
                 assert commits[0]["subject"] == "Initial commit"
 
     def test_commit_subject_with_pipe(self):
-        log_output = "abc123|abc1|Alice|2024-01-15T10:30:00+00:00|Fix bug | handle edge case"
+        log_output = (
+            "abc123|abc1|Alice|2024-01-15T10:30:00+00:00|Fix bug | handle edge case"
+        )
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", return_value=log_output):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", return_value=log_output
+            ):
                 commits = get_recent_commits(n=1)
 
                 assert len(commits) == 1
@@ -193,7 +211,9 @@ class TestGetRecentCommits:
         )
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", return_value=log_output):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", return_value=log_output
+            ):
                 commits = get_recent_commits(n=3)
 
                 assert len(commits) == 2
@@ -202,7 +222,9 @@ class TestGetRecentCommits:
         log_output = "abc123|abc1|Alice|2024-01-15T10:30:00+00:00|Commit\n\n"
 
         with patch("claudetracing.git_enrichment.is_git_repo", return_value=True):
-            with patch("claudetracing.git_enrichment._git_cmd", return_value=log_output):
+            with patch(
+                "claudetracing.git_enrichment._git_cmd", return_value=log_output
+            ):
                 commits = get_recent_commits(n=1)
 
                 assert len(commits) == 1
