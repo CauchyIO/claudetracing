@@ -6,7 +6,7 @@ import mlflow
 from mlflow import MlflowClient
 from mlflow.entities import Trace
 
-from .models import SpanInfo, TraceData, TraceInfo
+from claudetracing.models import SpanInfo, TraceData, TraceInfo
 
 
 class TracingClient:

@@ -6,20 +6,20 @@ via a composite hook handler.
 """
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from pydantic import BaseModel, Field
 
 # Key in settings.json environment to store active enrichments
 ENRICHMENTS_ENV_KEY = "CLAUDETRACING_ENRICHMENTS"
 
 
-@dataclass
-class Enrichment:
+class Enrichment(BaseModel):
     """Definition of a trace enrichment."""
 
     name: str
     description: str
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 # Registry of available enrichments
@@ -289,8 +289,7 @@ def detect_enrichments_from_traces(
     return detected
 
 
-@dataclass
-class EnrichmentMismatch:
+class EnrichmentMismatch(BaseModel):
     """Result of enrichment consistency check."""
 
     detected: set[str]

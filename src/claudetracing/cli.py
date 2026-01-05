@@ -13,7 +13,7 @@ app.add_typer(enrichment_app, name="enrichment")
 @app.command()
 def init():
     """Initialize Claude Code tracing in the current project."""
-    from .setup import run_setup
+    from claudetracing.setup import run_setup
 
     raise SystemExit(run_setup())
 
@@ -36,14 +36,14 @@ def search(
     ),
 ):
     """Search and retrieve traces."""
-    from .client import TracingClient
-    from .formatters import (
+    from claudetracing.client import TracingClient
+    from claudetracing.formatters import (
         format_for_context,
         format_tool_usage,
         format_traces_json,
         format_traces_summary,
     )
-    from .setup import load_settings
+    from claudetracing.setup import load_settings
 
     load_settings()  # Load .claude/settings.json env vars
     client = TracingClient()
@@ -74,8 +74,8 @@ def search(
 @app.command("list")
 def list_experiments():
     """List available experiments."""
-    from .client import TracingClient
-    from .setup import load_settings
+    from claudetracing.client import TracingClient
+    from claudetracing.setup import load_settings
 
     load_settings()  # Load .claude/settings.json env vars
     client = TracingClient()
@@ -93,7 +93,11 @@ def list_experiments():
 @enrichment_app.command("list")
 def enrichment_list():
     """List available trace enrichments."""
-    from .enrichments import get_active_enrichments, list_enrichments, load_settings
+    from claudetracing.enrichments import (
+        get_active_enrichments,
+        list_enrichments,
+        load_settings,
+    )
 
     enrichments = list_enrichments()
     settings = load_settings()
@@ -114,11 +118,15 @@ def enrichment_info(
     name: str = typer.Argument(..., help="Enrichment name to inspect"),
 ):
     """Show detailed information about an enrichment."""
-    from .enrichments import get_active_enrichments, get_enrichment, load_settings
+    from claudetracing.enrichments import (
+        get_active_enrichments,
+        get_enrichment,
+        load_settings,
+    )
 
     enrichment = get_enrichment(name)
     if not enrichment:
-        from .enrichments import ENRICHMENTS
+        from claudetracing.enrichments import ENRICHMENTS
 
         available = ", ".join(ENRICHMENTS.keys())
         typer.echo(f"Unknown enrichment '{name}'. Available: {available}", err=True)
@@ -146,7 +154,7 @@ def enrichment_add(
         traces enrichment add git
         traces enrichment add git files tokens
     """
-    from .enrichments import add_enrichments
+    from claudetracing.enrichments import add_enrichments
 
     success, message = add_enrichments(names)
     if success:
@@ -166,7 +174,7 @@ def enrichment_remove(
         traces enrichment remove git
         traces enrichment remove git files
     """
-    from .enrichments import remove_enrichments
+    from claudetracing.enrichments import remove_enrichments
 
     success, message = remove_enrichments(names)
     if success:
