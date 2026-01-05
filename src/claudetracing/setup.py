@@ -5,6 +5,13 @@ import os
 import subprocess
 from pathlib import Path
 
+# ANSI color codes
+YELLOW = "\033[33m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
 
 def load_settings() -> dict | None:
     """Load settings from .claude/settings.json and set environment variables.
@@ -37,10 +44,10 @@ def prompt_choice(message: str, choices: list[str], default: int = 0) -> int:
     """Prompt user to choose from a list. Returns index."""
     print(message)
     for i, choice in enumerate(choices):
-        marker = "*" if i == default else " "
-        print(f"  {marker} [{i + 1}] {choice}")
+        suffix = " (recommended)" if i == default else ""
+        print(f"  {GREEN}[{i + 1}]{RESET} {choice}{suffix}")
 
-    result = input(f"Choice [1-{len(choices)}] (default: {default + 1}): ").strip()
+    result = input(f"\nChoice [1-{len(choices)}] (default: {default + 1}): ").strip()
     if not result:
         return default
     try:
@@ -77,18 +84,22 @@ def get_databricks_profiles() -> list[dict]:
 
 
 def get_databricks_user(profile: str) -> str | None:
-    """Get current user's email from Databricks."""
-    try:
-        result = subprocess.run(
-            ["databricks", "current-user", "me", "--profile", profile, "-o", "json"],
-            capture_output=True,
-            text=True,
-            check=True,
+    """Get current user's email from Databricks.
+
+    Returns None if the command fails, with a warning printed to stderr.
+    """
+    result = subprocess.run(
+        ["databricks", "current-user", "me", "--profile", profile, "-o", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            f"{YELLOW}Warning: Could not get Databricks user: {result.stderr.strip()}{RESET}"
         )
-        data = json.loads(result.stdout)
-        return data.get("userName") or data.get("user_name")
-    except Exception:
         return None
+    data = json.loads(result.stdout)
+    return data.get("userName") or data.get("user_name")
 
 
 def create_settings_file(
@@ -110,7 +121,7 @@ def create_settings_file(
     claude_dir.mkdir(exist_ok=True)
     settings_path = claude_dir / "settings.json"
 
-    # Tracing-specific config
+    # Tracing-specific config - uses MLflow's built-in handler
     tracing_hook = {
         "type": "command",
         "command": 'uv run python -c "from mlflow.claude_code.hooks import stop_hook_handler; stop_hook_handler()"',
@@ -142,45 +153,72 @@ def create_settings_file(
         existing["environment"] = {}
     existing["environment"].update(tracing_env)
 
-    # Merge Stop hooks (append tracing hook to existing hooks)
+    # Clear enrichments on init (start fresh)
+    existing["environment"].pop("CLAUDETRACING_ENRICHMENTS", None)
+
+    # Merge Stop hooks - ensure exactly one tracing hook with default command
     if "hooks" not in existing:
         existing["hooks"] = {}
     if "Stop" not in existing["hooks"]:
         existing["hooks"]["Stop"] = []
 
-    # Check if tracing hook already exists anywhere in Stop hooks
-    hook_command = tracing_hook["command"]
-    hook_exists = any(
-        hook.get("command") == hook_command
-        or any(h.get("command") == hook_command for h in hook.get("hooks", []))
-        for hook in existing["hooks"]["Stop"]
-    )
+    # Remove all existing tracing hooks (mlflow or claudetracing)
+    for hook_block in existing["hooks"]["Stop"]:
+        if "hooks" in hook_block:
+            hook_block["hooks"] = [
+                h
+                for h in hook_block["hooks"]
+                if "mlflow" not in h.get("command", "")
+                and "claudetracing" not in h.get("command", "")
+            ]
 
-    if not hook_exists:
-        # Append to existing Stop block, or create new one if empty
-        if existing["hooks"]["Stop"] and "hooks" in existing["hooks"]["Stop"][0]:
-            existing["hooks"]["Stop"][0]["hooks"].append(tracing_hook)
-        else:
-            existing["hooks"]["Stop"] = [{"hooks": [tracing_hook]}]
+    # Remove empty hook blocks
+    existing["hooks"]["Stop"] = [
+        hb for hb in existing["hooks"]["Stop"] if hb.get("hooks") or hb.get("command")
+    ]
+
+    # Add the default tracing hook
+    if existing["hooks"]["Stop"] and "hooks" in existing["hooks"]["Stop"][0]:
+        existing["hooks"]["Stop"][0]["hooks"].append(tracing_hook)
+    else:
+        existing["hooks"]["Stop"] = [{"hooks": [tracing_hook]}]
 
     settings_path.write_text(json.dumps(existing, indent=2))
     return settings_path
 
 
-def update_gitignore(project_root: Path) -> None:
-    """Add Claude Code entries to .gitignore.
+def update_gitignore(project_root: Path) -> bool:
+    """Add Claude Code entries to .gitignore if user confirms.
 
     Args:
         project_root: Project root directory
+
+    Returns:
+        True if gitignore was updated, False otherwise
     """
     gitignore = project_root / ".gitignore"
     entries = [".claude/settings.local.json", ".claude/mlflow/", "mlruns/"]
     existing = gitignore.read_text() if gitignore.exists() else ""
 
     to_add = [e for e in entries if e not in existing]
-    if to_add:
-        with open(gitignore, "a") as f:
-            f.write("\n# Claude Code Tracing\n" + "\n".join(to_add) + "\n")
+    if not to_add:
+        return False
+
+    green = "\033[32m"
+    reset = "\033[0m"
+    print("\nAdd these entries to .gitignore?")
+    for entry in to_add:
+        print(f"  - {entry}")
+    print(f"  {green}[1]{reset} Yes (recommended)")
+    print(f"  {green}[2]{reset} No")
+
+    choice = input("\nChoice [1/2] (default: 1): ").strip()
+    if choice == "2":
+        return False
+
+    with open(gitignore, "a") as f:
+        f.write("\n# Claude Code Tracing\n" + "\n".join(to_add) + "\n")
+    return True
 
 
 def verify_connection(profile: str, experiment_path: str) -> bool:
@@ -192,8 +230,15 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
 
     Returns:
         True if connection succeeded
+
+    Raises:
+        Any unexpected exception - only catches connection/auth failures
     """
     import signal
+
+    import mlflow
+    from mlflow import get_experiment_by_name
+    from mlflow.exceptions import MlflowException
 
     def timeout_handler(signum, frame):
         raise TimeoutError("Connection timed out")
@@ -202,17 +247,63 @@ def verify_connection(profile: str, experiment_path: str) -> bool:
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(30)  # 30 second timeout
 
-        import mlflow
-
         os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
         mlflow.set_tracking_uri(f"databricks://{profile}")
-        mlflow.get_experiment_by_name(experiment_path)
+        get_experiment_by_name(experiment_path)
 
         signal.alarm(0)  # Cancel timeout
         return True
-    except (TimeoutError, Exception):
+    except (TimeoutError, MlflowException, ConnectionError, OSError) as e:
         signal.alarm(0)
+        print(f"Connection failed: {e}")
         return False
+
+
+def _check_and_warn_enrichment_mismatch(
+    experiment_path: str, profile: str | None = None
+) -> tuple[bool, list[str]]:
+    """Check for enrichment mismatch and prompt user.
+
+    Args:
+        experiment_path: MLflow experiment path
+        profile: Databricks profile (None for local)
+
+    Returns:
+        Tuple of (continue_setup, enrichments_to_add)
+    """
+    from claudetracing.enrichments import detect_enrichments_from_traces
+
+    print("Checking last 5 traces for enrichment configuration...")
+    detected = detect_enrichments_from_traces(experiment_path, profile)
+
+    if detected is None:
+        # Error occurred (warning already printed) or experiment doesn't exist
+        print("Could not detect existing enrichments - continuing with setup.")
+        return True, []
+
+    if len(detected) == 0:
+        print("No enrichments detected in existing traces.")
+        return True, []
+
+    detected_list = sorted(detected)
+    detected_str = ", ".join(detected_list)
+
+    print(f"\n{YELLOW}{BOLD}Enrichment mismatch detected{RESET}")
+    print(f"Existing traces use: {CYAN}{detected_str}{RESET}")
+    print("\nOptions:")
+    print(f"  {GREEN}[1]{RESET} Match existing enrichments (recommended)")
+    print(f"  {GREEN}[2]{RESET} Continue without enrichments")
+    print(f"  {GREEN}[3]{RESET} Cancel setup")
+
+    choice = input("\nChoice [1/2/3] (default: 1): ").strip()
+
+    if choice == "3":
+        return False, []
+    elif choice == "2":
+        return True, []
+    else:
+        # Default to matching (option 1)
+        return True, detected_list
 
 
 def run_setup() -> int:
@@ -223,14 +314,14 @@ def run_setup() -> int:
     storage_type = prompt_choice(
         "Where should traces be stored?",
         [
-            "Local (mlruns/ folder - no setup required)",
             "Databricks (requires workspace access)",
+            "Local (mlruns/ folder - no setup required)",
         ],
     )
 
     if storage_type == 0:
-        return setup_local()
-    return setup_databricks()
+        return setup_databricks()
+    return setup_local()
 
 
 def setup_local() -> int:
@@ -240,6 +331,14 @@ def setup_local() -> int:
 
     exp_name = prompt("Experiment name", default=project_name)
 
+    # Check for enrichment consistency with existing traces
+    continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
+        exp_name, profile=None
+    )
+    if not continue_setup:
+        print("Setup cancelled.")
+        return 1
+
     settings_path = create_settings_file(
         profile=None,
         experiment_path=exp_name,
@@ -247,12 +346,32 @@ def setup_local() -> int:
     )
     print(f"Created {settings_path.relative_to(project_root)}")
 
-    update_gitignore(project_root)
-    print("Updated .gitignore")
+    # Add enrichments if user chose to match
+    if enrichments_to_add:
+        from claudetracing.enrichments import add_enrichments
+
+        success, msg = add_enrichments(enrichments_to_add, project_root)
+        if success:
+            print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
+
+    if update_gitignore(project_root):
+        print("Updated .gitignore")
 
     print("\nSetup complete! Restart Claude Code to enable tracing.")
     print("Traces will be stored locally in: mlruns/")
     return 0
+
+
+def _authenticate_new_workspace() -> tuple[str, str | None]:
+    """Prompt for workspace URL, authenticate, and return (profile, user)."""
+    workspace = prompt(
+        "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
+    )
+    if not workspace.startswith("https://"):
+        workspace = f"https://{workspace}"
+    subprocess.run(["databricks", "auth", "login", "--host", workspace], check=True)
+    profile = workspace.replace("https://", "").split(".")[0]
+    return profile, get_databricks_user(profile)
 
 
 def setup_databricks() -> int:
@@ -260,14 +379,16 @@ def setup_databricks() -> int:
     # Check databricks CLI
     try:
         subprocess.run(["databricks", "--version"], capture_output=True, check=True)
-    except Exception:
+    except FileNotFoundError:
         print("Error: Databricks CLI not found. Install with: brew install databricks")
         return 1
 
     # Get or create profile
     profiles = get_databricks_profiles()
 
-    if profiles:
+    if not profiles:
+        profile, user = _authenticate_new_workspace()
+    else:
         choices = [f"{p['name']} ({p['host']})" for p in profiles] + [
             "Add new workspace"
         ]
@@ -277,25 +398,7 @@ def setup_databricks() -> int:
             profile = profiles[idx]["name"]
             user = get_databricks_user(profile)
         else:
-            workspace = prompt(
-                "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
-            )
-            if not workspace.startswith("https://"):
-                workspace = f"https://{workspace}"
-            subprocess.run(
-                ["databricks", "auth", "login", "--host", workspace], check=True
-            )
-            profile = workspace.replace("https://", "").split(".")[0]
-            user = get_databricks_user(profile)
-    else:
-        workspace = prompt(
-            "Databricks workspace URL (e.g., https://dbc-xxx.cloud.databricks.com)"
-        )
-        if not workspace.startswith("https://"):
-            workspace = f"https://{workspace}"
-        subprocess.run(["databricks", "auth", "login", "--host", workspace], check=True)
-        profile = workspace.replace("https://", "").split(".")[0]
-        user = get_databricks_user(profile)
+            profile, user = _authenticate_new_workspace()
 
     if user:
         print(f"Authenticated as: {user}")
@@ -336,14 +439,30 @@ def setup_databricks() -> int:
 
     print("Connection verified!")
 
+    # Check for enrichment consistency with existing traces
+    continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
+        experiment_path, profile
+    )
+    if not continue_setup:
+        print("Setup cancelled.")
+        return 1
+
     # Create settings.json
     project_root = Path.cwd()
     settings_path = create_settings_file(profile, experiment_path, project_root)
     print(f"Created {settings_path.relative_to(project_root)}")
 
+    # Add enrichments if user chose to match
+    if enrichments_to_add:
+        from claudetracing.enrichments import add_enrichments
+
+        success, msg = add_enrichments(enrichments_to_add, project_root)
+        if success:
+            print(f"Enabled enrichments: {', '.join(enrichments_to_add)}")
+
     # Update .gitignore
-    update_gitignore(project_root)
-    print("Updated .gitignore")
+    if update_gitignore(project_root):
+        print("Updated .gitignore")
 
     print("\nSetup complete! Restart Claude Code to enable tracing.")
     print(f"Traces will be sent to: {experiment_path}")
