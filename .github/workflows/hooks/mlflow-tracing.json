@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "uv --directory .github/hooks/tracing run session_start.py",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "uv --directory .github/hooks/tracing run copilot_trace.py",
+        "env": {
+          "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
+          "MLFLOW_TRACKING_URI": "databricks://dev",
+          "MLFLOW_EXPERIMENT_NAME": "/Workspace/Shared/copilot-tracing",
+          "DATABRICKS_CONFIG_PROFILE": "dev",
+          "COPILOT_TRACE_ASYNC": "1"
+        },
+        "timeout": 10
+      }
+    ]
+  }
+}
