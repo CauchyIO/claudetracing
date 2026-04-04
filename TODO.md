@@ -1,0 +1,3 @@
+- the current implementation allows sublevel experiment setup. E.g. in one prjoect the subfolder was being traced but the top levle wasnt. Resulting a misalignment on the part -> rather resolve the root based on the .git folder? OR atleast whatever is being tracked with git
+- If the auth has expired it silently fails on the PostHook call. Should pro-actively be re-activated.
+- Usage of projects where the traces have been setup do not enforce a way to use it. Should be included in the project CLAUDE.md in a way that forces claude to use it?
