@@ -154,7 +154,7 @@ def convert_vscode_transcript(vscode_path: str) -> tuple[str, int]:
 
 
 def main() -> None:
-    if os.environ.get("MLFLOW_CLAUDE_TRACING_ENABLED") != "1":
+    if os.environ.get("MLFLOW_CLAUDE_TRACING_ENABLED", "").lower() not in ("1", "true"):
         return
 
     try:

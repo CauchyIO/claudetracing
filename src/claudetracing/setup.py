@@ -3,7 +3,13 @@
 import json
 import os
 import subprocess
+from enum import Enum
 from pathlib import Path
+
+
+class TracingMode(str, Enum):
+    CLAUDE_CODE = "claude_code"
+    COPILOT = "copilot"
 
 # ANSI color codes
 YELLOW = "\033[33m"
@@ -187,6 +193,114 @@ def create_settings_file(
     return settings_path
 
 
+def _scaffold_copilot_scripts(tracing_dir: Path) -> None:
+    """Copy copilot adapter scripts into the project's .github/hooks/tracing/ dir.
+
+    Reads template files shipped with the package via importlib.resources.
+    Falls back to the repo's .github/hooks/tracing/ for development installs.
+    """
+    import importlib.resources
+
+    for filename in ("copilot_trace.py", "session_start.py"):
+        target = tracing_dir / filename
+        if target.exists():
+            continue
+
+        # Try package templates first (installed via wheel)
+        try:
+            ref = importlib.resources.files("claudetracing.templates").joinpath(
+                filename
+            )
+            target.write_text(ref.read_text(encoding="utf-8"), encoding="utf-8")
+            continue
+        except (ModuleNotFoundError, FileNotFoundError):
+            pass
+
+        # Fallback: repo checkout (editable install / development)
+        repo_source = Path(__file__).resolve().parents[2] / ".github" / "hooks" / "tracing" / filename
+        if repo_source.exists():
+            target.write_text(repo_source.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            print(f"{YELLOW}Warning: Could not find template for {filename}{RESET}")
+
+
+def create_copilot_config(
+    profile: str | None, experiment_path: str, project_root: Path
+) -> Path:
+    """Create VS Code Copilot tracing config and scaffold adapter scripts.
+
+    Creates:
+        - .github/hooks/tracing/copilot_trace.py (adapter script)
+        - .github/hooks/tracing/session_start.py (session hook)
+        - .github/hooks/tracing/pyproject.toml   (uv dependencies)
+        - .github/hooks/mlflow-tracing.json       (hook configuration)
+
+    Args:
+        profile: Databricks profile name, or None for local storage
+        experiment_path: MLflow experiment path/name
+        project_root: Project root directory
+
+    Returns:
+        Path to the hook configuration file
+    """
+    hooks_dir = project_root / ".github" / "hooks"
+    tracing_dir = hooks_dir / "tracing"
+    tracing_dir.mkdir(parents=True, exist_ok=True)
+
+    # Scaffold adapter scripts
+    _scaffold_copilot_scripts(tracing_dir)
+
+    # Create pyproject.toml for uv dependency resolution
+    pyproject_path = tracing_dir / "pyproject.toml"
+    if not pyproject_path.exists():
+        pyproject_content = (
+            '[project]\n'
+            'name = "copilot-hooks"\n'
+            'version = "0.1.0"\n'
+            'requires-python = ">=3.10"\n'
+            'dependencies = [\n'
+            '    "mlflow[genai]>=2.20.0",\n'
+            '    "databricks-sdk",\n'
+            ']\n'
+        )
+        pyproject_path.write_text(pyproject_content, encoding="utf-8")
+
+    # Build environment variables for the hook
+    env = {
+        "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
+        "MLFLOW_EXPERIMENT_NAME": experiment_path,
+        "COPILOT_TRACE_ASYNC": "1",
+    }
+    if profile:
+        env["MLFLOW_TRACKING_URI"] = f"databricks://{profile}"
+        env["DATABRICKS_CONFIG_PROFILE"] = profile
+
+    # Create or update the hook configuration
+    config_path = hooks_dir / "mlflow-tracing.json"
+    config = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "type": "command",
+                    "command": "uv --directory .github/hooks/tracing run session_start.py",
+                    "timeout": 5,
+                }
+            ],
+            "Stop": [
+                {
+                    "type": "command",
+                    "command": "uv --directory .github/hooks/tracing run copilot_trace.py",
+                    "env": env,
+                    "timeout": 10,
+                }
+            ],
+        }
+    }
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+    return config_path
+
+
 def update_gitignore(project_root: Path) -> bool:
     """Add Claude Code entries to .gitignore if user confirms.
 
@@ -310,6 +424,16 @@ def run_setup() -> int:
     """Run the interactive setup process."""
     print("\n=== Claude Code Tracing Setup ===\n")
 
+    # Choose tracing mode
+    mode_idx = prompt_choice(
+        "Which agent are you setting up tracing for?",
+        [
+            "Claude Code (CLI)",
+            "VS Code Copilot",
+        ],
+    )
+    mode = TracingMode.CLAUDE_CODE if mode_idx == 0 else TracingMode.COPILOT
+
     # Choose storage backend
     storage_type = prompt_choice(
         "Where should traces be stored?",
@@ -320,17 +444,33 @@ def run_setup() -> int:
     )
 
     if storage_type == 0:
-        return setup_databricks()
-    return setup_local()
+        return setup_databricks(mode)
+    return setup_local(mode)
 
 
-def setup_local() -> int:
+def setup_local(mode: TracingMode = TracingMode.CLAUDE_CODE) -> int:
     """Setup local MLflow storage."""
     project_root = Path.cwd()
     project_name = project_root.name
 
     exp_name = prompt("Experiment name", default=project_name)
 
+    if mode == TracingMode.COPILOT:
+        config_path = create_copilot_config(
+            profile=None,
+            experiment_path=exp_name,
+            project_root=project_root,
+        )
+        print(f"Created {config_path.relative_to(project_root)}")
+
+        if update_gitignore(project_root):
+            print("Updated .gitignore")
+
+        print("\nSetup complete! Restart your IDE to enable tracing.")
+        print("Traces will be stored locally in: mlruns/")
+        return 0
+
+    # Claude Code path (legacy)
     # Check for enrichment consistency with existing traces
     continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
         exp_name, profile=None
@@ -374,7 +514,7 @@ def _authenticate_new_workspace() -> tuple[str, str | None]:
     return profile, get_databricks_user(profile)
 
 
-def setup_databricks() -> int:
+def setup_databricks(mode: TracingMode = TracingMode.CLAUDE_CODE) -> int:
     """Setup Databricks MLflow storage."""
     # Check databricks CLI
     try:
@@ -439,6 +579,20 @@ def setup_databricks() -> int:
 
     print("Connection verified!")
 
+    project_root = Path.cwd()
+
+    if mode == TracingMode.COPILOT:
+        config_path = create_copilot_config(profile, experiment_path, project_root)
+        print(f"Created {config_path.relative_to(project_root)}")
+
+        if update_gitignore(project_root):
+            print("Updated .gitignore")
+
+        print("\nSetup complete! Restart your IDE to enable tracing.")
+        print(f"Traces will be sent to: {experiment_path}")
+        return 0
+
+    # Claude Code path (legacy)
     # Check for enrichment consistency with existing traces
     continue_setup, enrichments_to_add = _check_and_warn_enrichment_mismatch(
         experiment_path, profile
@@ -447,8 +601,6 @@ def setup_databricks() -> int:
         print("Setup cancelled.")
         return 1
 
-    # Create settings.json
-    project_root = Path.cwd()
     settings_path = create_settings_file(profile, experiment_path, project_root)
     print(f"Created {settings_path.relative_to(project_root)}")
 
