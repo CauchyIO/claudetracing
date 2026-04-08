@@ -12,7 +12,7 @@
         "type": "command",
         "command": "uv --directory .github/hooks/tracing run copilot_trace.py",
         "env": {
-          "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
+          "MLFLOW_CLAUDE_TRACING_ENABLED": "1",
           "MLFLOW_TRACKING_URI": "databricks://dev",
           "MLFLOW_EXPERIMENT_NAME": "/Workspace/Shared/copilot-tracing",
           "DATABRICKS_CONFIG_PROFILE": "dev",
