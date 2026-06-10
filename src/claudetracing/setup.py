@@ -33,6 +33,31 @@ def load_settings() -> dict | None:
     return settings
 
 
+def load_tracing_env(project_root: Path | None = None) -> None:
+    """Populate os.environ with the `environment` block from the project's
+    Claude settings, so auth/config reaches the hook subprocess.
+
+    Reads `.claude/settings.json` then `.claude/settings.local.json`. Precedence,
+    highest first: existing os.environ > settings.local.json > settings.json.
+
+    The existing-env-wins rule means injected cloud/SPN secrets
+    (`DATABRICKS_HOST`/`CLIENT_ID`/`CLIENT_SECRET`) are never clobbered, while the
+    gitignored `.local` overrides committed defaults for per-machine auth (e.g. a
+    `DATABRICKS_CONFIG_PROFILE`). This makes a *bare* `MLFLOW_TRACKING_URI=databricks`
+    work both on a laptop (profile in `.local`) and headless in the cloud (SPN env).
+    """
+    root = Path(project_root) if project_root else Path.cwd()
+    merged: dict[str, str] = {}
+    for name in ("settings.json", "settings.local.json"):
+        path = root / ".claude" / name
+        if not path.exists():
+            continue
+        env = json.loads(path.read_text()).get("environment", {})
+        merged.update({k: str(v) for k, v in env.items()})
+    for key, value in merged.items():
+        os.environ.setdefault(key, value)
+
+
 def prompt(message: str, default: str | None = None) -> str:
     """Prompt user for input with optional default."""
     suffix = f" [{default}]: " if default else ": "
@@ -103,43 +128,62 @@ def get_databricks_user(profile: str) -> str | None:
 
 
 def create_settings_file(
-    profile: str | None, experiment_path: str, project_root: Path
+    profile: str | None,
+    experiment_path: str,
+    project_root: Path,
+    *,
+    spn: bool = False,
 ) -> Path:
-    """Create or update .claude/settings.json file.
+    """Create or update .claude/settings.json (+ settings.local.json for profile auth).
 
-    Merges tracing config into existing settings, preserving other hooks and env vars.
+    Auth modes:
+        - ``spn=True``: headless / service principal. Commits a bare
+          ``MLFLOW_TRACKING_URI=databricks``; writes no profile and no secrets — the
+          environment must supply ``DATABRICKS_HOST`` / ``DATABRICKS_CLIENT_ID`` /
+          ``DATABRICKS_CLIENT_SECRET``.
+        - ``profile`` given: commits a bare ``MLFLOW_TRACKING_URI=databricks`` and writes the
+          per-machine ``DATABRICKS_CONFIG_PROFILE`` to the gitignored ``settings.local.json``.
+          The runtime loader (`load_tracing_env`) pulls it into ``os.environ`` at hook time.
+        - neither: local ``mlruns/`` storage (no tracking URI).
+
+    A bare URI keeps credentials in the environment, never the committed file, so the same
+    settings.json works on a laptop (profile via .local) and headless in the cloud (SPN env).
 
     Args:
-        profile: Databricks profile name, or None for local storage
-        experiment_path: MLflow experiment path/name
-        project_root: Project root directory
+        profile: Databricks profile name (per-machine auth), or None.
+        experiment_path: MLflow experiment path/name.
+        project_root: Project root directory.
+        spn: Configure for service-principal / headless auth.
 
     Returns:
-        Path to the settings file
+        Path to the settings file.
     """
+    from claudetracing.enrichments import DEFAULT_HOOK_COMMAND, ENRICHED_HOOK_COMMAND
+
     claude_dir = project_root / ".claude"
     claude_dir.mkdir(exist_ok=True)
     settings_path = claude_dir / "settings.json"
 
-    # Tracing-specific config - uses MLflow's built-in handler
-    tracing_hook = {
-        "type": "command",
-        "command": 'uv run python -c "from mlflow.claude_code.hooks import stop_hook_handler; stop_hook_handler()"',
-    }
+    databricks = spn or bool(profile)
 
-    # Environment config depends on local vs Databricks
-    if profile:
+    if databricks:
         tracing_env = {
             "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
-            "MLFLOW_TRACKING_URI": f"databricks://{profile}",
+            "MLFLOW_TRACKING_URI": "databricks",
             "MLFLOW_EXPERIMENT_NAME": experiment_path,
-            "DATABRICKS_CONFIG_PROFILE": profile,
         }
     else:
         tracing_env = {
             "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
             "MLFLOW_EXPERIMENT_NAME": experiment_path,
         }
+
+    # Databricks auth needs the enriched handler — it runs load_tracing_env() to wire the
+    # credential env (profile from .local, or SPN secrets) before any Databricks call.
+    tracing_hook = {
+        "type": "command",
+        "command": ENRICHED_HOOK_COMMAND if databricks else DEFAULT_HOOK_COMMAND,
+    }
 
     # Load existing settings or start fresh
     if settings_path.exists():
@@ -153,10 +197,13 @@ def create_settings_file(
         existing["environment"] = {}
     existing["environment"].update(tracing_env)
 
+    # A bare URI must not be shadowed by a stale committed profile from an older setup.
+    existing["environment"].pop("DATABRICKS_CONFIG_PROFILE", None)
+
     # Clear enrichments on init (start fresh)
     existing["environment"].pop("CLAUDETRACING_ENRICHMENTS", None)
 
-    # Merge Stop hooks - ensure exactly one tracing hook with default command
+    # Merge Stop hooks - ensure exactly one tracing hook
     if "hooks" not in existing:
         existing["hooks"] = {}
     if "Stop" not in existing["hooks"]:
@@ -177,14 +224,28 @@ def create_settings_file(
         hb for hb in existing["hooks"]["Stop"] if hb.get("hooks") or hb.get("command")
     ]
 
-    # Add the default tracing hook
+    # Add the tracing hook
     if existing["hooks"]["Stop"] and "hooks" in existing["hooks"]["Stop"][0]:
         existing["hooks"]["Stop"][0]["hooks"].append(tracing_hook)
     else:
         existing["hooks"]["Stop"] = [{"hooks": [tracing_hook]}]
 
     settings_path.write_text(json.dumps(existing, indent=2))
+
+    # Per-machine profile lives in the gitignored .local, never the committed file.
+    if profile and not spn:
+        _write_local_profile(project_root, profile)
+
     return settings_path
+
+
+def _write_local_profile(project_root: Path, profile: str) -> Path:
+    """Write DATABRICKS_CONFIG_PROFILE into the gitignored .claude/settings.local.json."""
+    local_path = project_root / ".claude" / "settings.local.json"
+    data = json.loads(local_path.read_text()) if local_path.exists() else {}
+    data.setdefault("environment", {})["DATABRICKS_CONFIG_PROFILE"] = profile
+    local_path.write_text(json.dumps(data, indent=2))
+    return local_path
 
 
 def update_gitignore(project_root: Path) -> bool:
@@ -306,9 +367,37 @@ def _check_and_warn_enrichment_mismatch(
         return True, detected_list
 
 
-def run_setup() -> int:
-    """Run the interactive setup process."""
+def _existing_tracing_config(project_root: Path | None = None) -> dict | None:
+    """Return the committed tracing `environment` block if tracing is already set up."""
+    path = (project_root or Path.cwd()) / ".claude" / "settings.json"
+    if not path.exists():
+        return None
+    env = json.loads(path.read_text()).get("environment", {})
+    if env.get("MLFLOW_CLAUDE_TRACING_ENABLED") or env.get("MLFLOW_TRACKING_URI"):
+        return env
+    return None
+
+
+def run_setup(spn: bool = False) -> int:
+    """Run the interactive setup process.
+
+    Args:
+        spn: Configure headless service-principal auth (no local profile prompt).
+    """
     print("\n=== Claude Code Tracing Setup ===\n")
+
+    # Don't force reconfiguration (or a profile prompt) when tracing already exists.
+    existing = _existing_tracing_config()
+    if existing is not None:
+        uri = existing.get("MLFLOW_TRACKING_URI", "local (mlruns/)")
+        exp = existing.get("MLFLOW_EXPERIMENT_NAME", "?")
+        print(f"Tracing is already configured (uri={uri}, experiment={exp}).")
+        if prompt_choice("What would you like to do?", ["Keep it", "Reconfigure"]) == 0:
+            print("Keeping existing tracing configuration. Nothing to do.")
+            return 0
+
+    if spn:
+        return setup_spn()
 
     # Choose storage backend
     storage_type = prompt_choice(
@@ -322,6 +411,53 @@ def run_setup() -> int:
     if storage_type == 0:
         return setup_databricks()
     return setup_local()
+
+
+def setup_spn() -> int:
+    """Configure headless service-principal tracing — no local profile, no secrets on disk.
+
+    Credentials are resolved from the run environment (DATABRICKS_HOST / DATABRICKS_CLIENT_ID
+    / DATABRICKS_CLIENT_SECRET), e.g. cloud routine env secrets. Nothing is verified locally
+    because the SPN credentials are not expected to be present on this machine.
+    """
+    print("\nService-principal / headless tracing.")
+    print("Auth is resolved from the environment at run time — no profile is stored.\n")
+
+    exp_name = prompt("Experiment name", default=Path.cwd().name)
+    exp_type = prompt_choice(
+        "Experiment location:",
+        [
+            "Shared folder - visible to all workspace users (recommended)",
+            "Personal folder",
+        ],
+    )
+    if exp_type == 0:
+        experiment_path = f"/Workspace/Shared/{exp_name}"
+    else:
+        user = prompt("Databricks email (for personal folder path)")
+        experiment_path = f"/Workspace/Users/{user}/{exp_name}"
+
+    project_root = Path.cwd()
+    settings_path = create_settings_file(
+        profile=None,
+        experiment_path=experiment_path,
+        project_root=project_root,
+        spn=True,
+    )
+    print(f"Created {settings_path.relative_to(project_root)}")
+
+    if update_gitignore(project_root):
+        print("Updated .gitignore")
+
+    print("\nSetup complete (service-principal mode).")
+    print(
+        "Provide these in the run environment (e.g. cloud routine secrets) — never commit them:"
+    )
+    print("  DATABRICKS_HOST=https://<workspace-host>")
+    print("  DATABRICKS_CLIENT_ID=<service principal application id>")
+    print("  DATABRICKS_CLIENT_SECRET=<service principal secret>")
+    print(f"\nTraces will be sent to: {experiment_path}")
+    return 0
 
 
 def setup_local() -> int:
