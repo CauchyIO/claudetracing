@@ -20,6 +20,13 @@ def enriched_stop_hook_handler() -> None:
         setup_mlflow,
     )
 
+    from claudetracing.setup import load_tracing_env
+
+    # Bring the project's `environment` block (incl. .local per-machine auth such as
+    # DATABRICKS_CONFIG_PROFILE) into os.environ before any MLflow/Databricks call.
+    # Existing env wins, so injected cloud SPN secrets are preserved.
+    load_tracing_env()
+
     logger = get_logger()
 
     if not is_tracing_enabled():

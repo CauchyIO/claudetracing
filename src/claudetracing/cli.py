@@ -11,11 +11,18 @@ app.add_typer(enrichment_app, name="enrichment")
 
 
 @app.command()
-def init():
+def init(
+    spn: bool = typer.Option(
+        False,
+        "--spn",
+        help="Configure headless service-principal auth (no local profile; "
+        "credentials come from DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET in the environment).",
+    ),
+):
     """Initialize Claude Code tracing in the current project."""
     from claudetracing.setup import run_setup
 
-    raise SystemExit(run_setup())
+    raise SystemExit(run_setup(spn=spn))
 
 
 @app.command()

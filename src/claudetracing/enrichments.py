@@ -118,7 +118,16 @@ def _set_active_enrichments(settings: dict, enrichments: list[str]) -> dict:
 
 
 def _update_hook_command(settings: dict, use_enriched: bool) -> dict:
-    """Update the hook command based on whether enrichments are active."""
+    """Update the hook command based on whether enrichments are active.
+
+    Databricks auth (a ``databricks`` tracking URI) always needs the enriched handler,
+    because it runs the loader that wires the credential env before any Databricks call.
+    So never downgrade to the plain MLflow hook while a Databricks URI is configured, even
+    when no content enrichments remain.
+    """
+    uri = settings.get("environment", {}).get("MLFLOW_TRACKING_URI", "")
+    if uri.startswith("databricks"):
+        use_enriched = True
     target_command = ENRICHED_HOOK_COMMAND if use_enriched else DEFAULT_HOOK_COMMAND
 
     hooks = settings.get("hooks", {}).get("Stop", [])
