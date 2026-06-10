@@ -439,7 +439,10 @@ def setup_spn() -> int:
 
     project_root = Path.cwd()
     settings_path = create_settings_file(
-        profile=None, experiment_path=experiment_path, project_root=project_root, spn=True
+        profile=None,
+        experiment_path=experiment_path,
+        project_root=project_root,
+        spn=True,
     )
     print(f"Created {settings_path.relative_to(project_root)}")
 
@@ -447,7 +450,9 @@ def setup_spn() -> int:
         print("Updated .gitignore")
 
     print("\nSetup complete (service-principal mode).")
-    print("Provide these in the run environment (e.g. cloud routine secrets) — never commit them:")
+    print(
+        "Provide these in the run environment (e.g. cloud routine secrets) — never commit them:"
+    )
     print("  DATABRICKS_HOST=https://<workspace-host>")
     print("  DATABRICKS_CLIENT_ID=<service principal application id>")
     print("  DATABRICKS_CLIENT_SECRET=<service principal secret>")

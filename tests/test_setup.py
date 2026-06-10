@@ -208,8 +208,12 @@ def test_load_tracing_env_precedence():
             load_tracing_env(project_root=Path(tmpdir))
 
             assert os.environ["CT_TEST_BASE"] == "from_settings"  # settings.json base
-            assert os.environ["CT_TEST_OVERRIDE"] == "from_local"  # .local wins over settings.json
-            assert os.environ["CT_TEST_EXISTING"] == "from_real_env"  # real env wins over both
+            assert (
+                os.environ["CT_TEST_OVERRIDE"] == "from_local"
+            )  # .local wins over settings.json
+            assert (
+                os.environ["CT_TEST_EXISTING"] == "from_real_env"
+            )  # real env wins over both
         finally:
             for k, v in saved.items():
                 if v is None:
