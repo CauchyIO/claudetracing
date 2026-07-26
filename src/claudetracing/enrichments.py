@@ -52,7 +52,34 @@ ENRICHMENTS: dict[str, Enrichment] = {
             "tokens.total - Total tokens (input + output)",
         ],
     ),
+    "model": Enrichment(
+        name="model",
+        description="Adds the Claude model(s) that served the session",
+        tags=[
+            "model - Comma-separated distinct models seen in the transcript",
+            "model.primary - Model with the most assistant messages",
+        ],
+    ),
 }
+
+# Tag-key shapes each enrichment writes; used to detect enrichments on existing
+# traces. "model" is a bare tag (no dot), the others are dotted prefixes.
+_ENRICHMENT_TAG_MATCHERS = {
+    "git": lambda k: k.startswith("git."),
+    "files": lambda k: k.startswith("files."),
+    "tokens": lambda k: k.startswith("tokens."),
+    "model": lambda k: k == "model" or k.startswith("model."),
+}
+
+
+def enrichments_in_tags(tags: dict) -> set[str]:
+    """Map a trace's tag keys to the enrichment names that produce them."""
+    return {
+        name
+        for name, matches in _ENRICHMENT_TAG_MATCHERS.items()
+        if any(matches(k) for k in tags)
+    }
+
 
 # The default MLflow hook command (no enrichment)
 DEFAULT_HOOK_COMMAND = 'uv run python -c "from mlflow.claude_code.hooks import stop_hook_handler; stop_hook_handler()"'
@@ -280,12 +307,7 @@ def detect_enrichments_from_traces(
         tags = trace.info.tags or {}
         if tags:
             traces_with_tags += 1
-        if any(k.startswith("git.") for k in tags):
-            detected.add("git")
-        if any(k.startswith("files.") for k in tags):
-            detected.add("files")
-        if any(k.startswith("tokens.") for k in tags):
-            detected.add("tokens")
+        detected |= enrichments_in_tags(tags)
 
     # Warn if we got traces but none had tags - likely a data download issue
     if traces and traces_with_tags == 0:

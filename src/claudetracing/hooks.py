@@ -74,6 +74,8 @@ def enriched_stop_hook_handler() -> None:
                     enrichments.update(_get_files_attributes(transcript_path, logger))
                 elif name == "tokens" and transcript_path:
                     enrichments.update(_get_tokens_attributes(transcript_path, logger))
+                elif name == "model" and transcript_path:
+                    enrichments.update(_get_model_attributes(transcript_path, logger))
 
             # Set enrichments as trace tags (the only post-creation option in MLflow)
             if enrichments:
