@@ -60,6 +60,7 @@ Enrichments add extra metadata to your traces. They are optional and can be enab
 | `git` | Adds git repository context: commit ID, branch, remote URL, repo name |
 | `files` | Adds list of files modified (written/edited) during the session |
 | `tokens` | Adds token usage statistics including cache metrics |
+| `model` | Adds the Claude model(s) that served the session |
 
 ### Managing Enrichments
 
@@ -96,6 +97,13 @@ Monitor token consumption and cache efficiency:
 - `tokens.cache_read` - Tokens read from prompt cache
 - `tokens.cache_creation` - Tokens written to prompt cache
 - `tokens.total` - Total tokens (input + output)
+
+### Model Enrichment
+
+See which Claude model(s) served the session:
+
+- `model` - Comma-separated distinct models seen in the transcript
+- `model.primary` - Model with the most assistant messages
 
 ---
 

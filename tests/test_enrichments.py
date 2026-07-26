@@ -8,6 +8,7 @@ from claudetracing.enrichments import (
     DEFAULT_HOOK_COMMAND,
     ENRICHED_HOOK_COMMAND,
     add_enrichments,
+    enrichments_in_tags,
     get_active_enrichments,
     get_enrichment,
     list_enrichments,
@@ -23,7 +24,7 @@ class TestListAndGetEnrichments:
     def test_list_enrichments_returns_all(self):
         enrichments = list_enrichments()
         names = {e.name for e in enrichments}
-        assert names == {"git", "files", "tokens"}
+        assert names == {"git", "files", "tokens", "model"}
 
     def test_get_enrichment_valid(self):
         enrichment = get_enrichment("git")
@@ -277,3 +278,20 @@ class TestLoadSaveSettings:
             loaded = load_settings(project_root)
 
             assert loaded == settings
+
+
+class TestEnrichmentsInTags:
+    def test_maps_all_known_tag_shapes(self):
+        tags = {
+            "git.branch": "main",
+            "files.count": "2",
+            "tokens.total": "5",
+            "model": "claude-opus-5",
+        }
+        assert enrichments_in_tags(tags) == {"git", "files", "tokens", "model"}
+
+    def test_plain_model_tag_alone_is_detected(self):
+        assert enrichments_in_tags({"model": "claude-opus-5"}) == {"model"}
+
+    def test_unknown_tags_ignored(self):
+        assert enrichments_in_tags({"mlflow.trace.session": "x"}) == set()

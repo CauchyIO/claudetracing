@@ -74,6 +74,8 @@ def enriched_stop_hook_handler() -> None:
                     enrichments.update(_get_files_attributes(transcript_path, logger))
                 elif name == "tokens" and transcript_path:
                     enrichments.update(_get_tokens_attributes(transcript_path, logger))
+                elif name == "model" and transcript_path:
+                    enrichments.update(_get_model_attributes(transcript_path, logger))
 
             # Set enrichments as trace tags (the only post-creation option in MLflow)
             if enrichments:
@@ -242,3 +244,44 @@ def _extract_token_usage(transcript_path: str) -> dict[str, int]:
 
     totals["tokens.total"] = totals["tokens.input"] + totals["tokens.output"]
     return totals
+
+
+def _get_model_attributes(transcript_path: str, logger) -> dict[str, str]:
+    """Get model usage as trace tags: distinct models + primary by turn count.
+
+    Ties on turn count break deterministically toward the lexicographically
+    greater model name. MLflow trace tags cap at 255 bytes; the joined list is
+    replaced by just the primary in the degenerate many-models case.
+    """
+    MAX_TAG_BYTES = 250
+
+    counts = _extract_model_usage(transcript_path)
+    logger.debug("Model enrichment: %s", counts)
+    if not counts:
+        return {}
+
+    primary = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    value = ", ".join(sorted(counts))
+    if len(value.encode("utf-8")) > MAX_TAG_BYTES:
+        value = primary
+    return {"model": value, "model.primary": primary}
+
+
+def _extract_model_usage(transcript_path: str) -> dict[str, int]:
+    """Count assistant messages per model in the transcript.
+
+    Placeholder models like ``<synthetic>`` (harness-generated entries) are
+    not real serving models and are skipped.
+    """
+    counts: dict[str, int] = {}
+
+    with open(transcript_path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            model = entry.get("message", {}).get("model")
+            if model and not model.startswith("<"):
+                counts[model] = counts.get(model, 0) + 1
+
+    return counts
