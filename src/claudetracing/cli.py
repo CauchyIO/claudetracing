@@ -5,7 +5,9 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="Claude Code MLflow tracing CLI")
+app = typer.Typer(help="Claude Code and Codex MLflow tracing CLI")
+codex_app = typer.Typer(help="Configure and replay Codex conversation tracing")
+app.add_typer(codex_app, name="codex")
 enrichment_app = typer.Typer(help="Manage trace enrichments")
 app.add_typer(enrichment_app, name="enrichment")
 
@@ -23,6 +25,75 @@ def init(
     from claudetracing.setup import run_setup
 
     raise SystemExit(run_setup(spn=spn))
+
+
+@codex_app.command("init")
+def codex_init(
+    experiment: str = typer.Option(
+        ..., "--experiment", "-e", help="MLflow experiment name/path"
+    ),
+    tracking_uri: str = typer.Option(
+        "", "--tracking-uri", help="MLflow URI; defaults to local SQLite"
+    ),
+    profile: Optional[str] = typer.Option(
+        None, "--profile", help="Databricks OAuth/CLI profile"
+    ),
+    archive: bool = typer.Option(
+        True,
+        "--archive/--no-archive",
+        help="Retain the full raw rollout as an MLflow artifact",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Confirm user-level notifier installation"
+    ),
+):
+    """Register this project and install a user-level Codex notify hook."""
+    from pathlib import Path
+    from claudetracing.codex import codex_home, configure
+
+    if profile and tracking_uri:
+        raise typer.BadParameter("Use --profile or --tracking-uri, not both")
+    root = Path.cwd().resolve()
+    uri = f"databricks://{profile}" if profile else tracking_uri
+    if not uri:
+        uri = f"sqlite:///{codex_home() / 'claudetracing' / 'mlflow.db'}"
+    typer.echo(f"Project: {root}\nExperiment: {experiment}\nTracking URI: {uri}")
+    typer.echo(
+        f"Updates {codex_home() / 'config.toml'}; preserves the existing notifier."
+    )
+    if archive:
+        typer.echo(
+            "Uploads the full persisted rollout, including prompts and tool outputs."
+        )
+    if not yes:
+        typer.confirm("Install Codex tracing?", abort=True)
+    configure(root, uri, experiment, archive=archive)
+    typer.echo(
+        "Configured. Restart Codex. Logs and retry state: "
+        + str(codex_home() / "claudetracing")
+    )
+
+
+@codex_app.command("replay")
+def codex_replay(session_id: str = typer.Argument(..., help="Codex thread UUID")):
+    """Export missed completed turns and refresh this session's raw archive."""
+    from pathlib import Path
+    from claudetracing.codex import Notification, export_session, target_for
+
+    if target_for(Path.cwd()) is None:
+        raise typer.BadParameter(
+            "This directory is not configured; run traces codex init first"
+        )
+    export_session(
+        Notification.model_validate(
+            {
+                "type": "agent-turn-complete",
+                "thread-id": session_id,
+                "cwd": str(Path.cwd()),
+            }
+        )
+    )
+    typer.echo("Codex session export complete.")
 
 
 @app.command()
