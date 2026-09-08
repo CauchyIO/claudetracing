@@ -1,4 +1,4 @@
-# Claude Code MLflow Tracing
+# Claude Code and Codex MLflow Tracing
 
 [![PyPI version](https://img.shields.io/pypi/v/claudetracing.svg)](https://pypi.org/project/claudetracing/)
 [![Python versions](https://img.shields.io/pypi/pyversions/claudetracing.svg)](https://pypi.org/project/claudetracing/)
@@ -48,6 +48,90 @@ traces search --trace-id <id>    # Get specific trace
 traces search -f json            # Output as JSON
 traces search -f context         # LLM-optimized format
 ```
+
+## Codex support
+
+Configure a project using a Databricks profile (OAuth/CLI authentication; no PAT required):
+
+```bash
+traces codex init --profile my-workspace --experiment /Workspace/Shared/my-project
+```
+
+Or use a tracking server or local storage:
+
+```bash
+traces codex init --tracking-uri http://localhost:5000 --experiment my-project
+traces codex init --experiment my-project  # SQLite and artifacts under CODEX_HOME
+```
+
+For a headless Databricks environment, use `--tracking-uri databricks` and supply
+`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and `DATABRICKS_CLIENT_SECRET` through the
+environment. `--profile` and `--tracking-uri` are mutually exclusive. `--yes` skips
+the installation confirmation.
+
+Restart Codex after setup. This integration is Python-native; it does not require
+Node.js or `@mlflow/codex`.
+
+### What setup changes
+
+Codex CLI 0.153.4 ignores project-level `notify` entries, so setup installs the hook
+in `$CODEX_HOME/config.toml` (`~/.codex/config.toml` by default). It preserves TOML
+comments, unrelated settings, and the existing notification command. The original
+config is backed up once as `config.before-claudetracing.toml`.
+
+Project paths and tracing destinations are registered in
+`$CODEX_HOME/claudetracing.json`, outside the project repository. Only registered
+directories and their descendants are traced; the most specific registration wins.
+Other projects still receive the original notification. Setup can be repeated for
+multiple projects without chaining duplicate hooks. The hook uses the Python
+interpreter that ran setup, so keep that environment installed.
+
+### Conversation capture and replay
+
+- Each completed turn becomes an AGENT trace grouped by Codex thread ID. Prompts
+  and assistant messages are retained on the root span; TOOL spans include both
+  `function_call` and `custom_tool_call` inputs/results and recorded timestamps.
+- Token counts are deltas of Codex's cumulative usage, rather than repeated sums
+  of the session total. The serving model is recorded as a trace tag.
+- Each notification scans the persisted rollout for missed completed turns.
+  Local checkpoints skip turns already exported successfully; per-session locks
+  serialize overlapping notifications.
+- By default, the entire available rollout is also saved as
+  `conversation/rollout.jsonl` in an MLflow run tagged `codex.session_id`. A
+  `codex.rollout_sha256` tag verifies the snapshot. This retains unsupported record
+  types, instructions, and partial turns that the readable trace view omits.
+  Choose `--no-archive` during setup to disable this additional raw upload.
+
+Exports run in a detached worker so a short-lived Codex CLI process can exit
+without cutting off the upload. Failures are recorded in
+`$CODEX_HOME/claudetracing/errors.log`; worker/notifier output is in `notify.log`.
+After resolving a connectivity or authentication problem, replay from the
+configured project directory:
+
+```bash
+traces codex replay <thread-uuid>
+```
+
+`MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT_NAME`, and `MLFLOW_EXPERIMENT_ID` in the
+Codex launch environment override the registered destination. Credentials stay in
+Databricks profiles or environment variables, not in generated tracing settings.
+
+Capture requires a local rollout under `$CODEX_HOME/sessions`. Ephemeral sessions
+and remote subagent transcripts are not recoverable through this hook. Interrupted
+turns remain in the raw archive but are not presented as completed turn traces.
+The raw archive contains everything Codex persisted, which can include sensitive
+prompt and tool content; it is not a reconstruction of unrecorded model context.
+An exporter crash between successful remote persistence and writing the local
+checkpoint can result in a duplicate turn on replay. Deleting checkpoints also
+allows re-export; they are not a server-side exactly-once guarantee.
+
+The existing `traces enrichment` commands configure Claude hooks. Codex currently
+records model and token metadata directly and does not apply Claude-specific
+enrichment settings.
+
+See [Codex configuration](https://developers.openai.com/codex/config-reference/)
+and [MLflow's Codex integration](https://mlflow.org/docs/latest/genai/tracing/integrations/listing/codex/)
+for the underlying notify/rollout model.
 
 ## Enrichments
 
