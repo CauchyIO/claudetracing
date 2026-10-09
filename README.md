@@ -252,6 +252,16 @@ We chose advisory warnings over enforcement because:
 - Some users may not have all enrichments available (e.g., no git repo)
 - Respecting user autonomy while surfacing potential issues
 
+## Releasing
+
+Cutting a release is the merge that bumps the version, nothing else. In the pull request that changes the package:
+
+```bash
+uv version --bump patch   # or minor / major
+```
+
+Then add a `## v<version>` section to `CHANGELOG.md` describing the change. CI refuses a pull request that touches `src/` or `pyproject.toml` without a bump, a bump that is not above the latest tag, or a bump without its changelog section (`tools/check_version_bump.py`). When the pull request lands on `master`, CI builds the package, publishes it to PyPI through trusted publishing, tags the commit, and creates the GitHub release with the changelog section as its body. No tag is pushed by hand.
+
 ## License
 
 MIT
