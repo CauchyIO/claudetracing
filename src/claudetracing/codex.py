@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 import tomlkit
@@ -31,6 +33,11 @@ class CodexTracingConfig(BaseModel):
         default=None,
         validation_alias=AliasChoices("traceLocation", "trace_location"),
         serialization_alias="traceLocation",
+    )
+    tracking_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("trackingToken", "tracking_token"),
+        serialization_alias="trackingToken",
     )
 
 
@@ -66,14 +73,21 @@ def is_mlflow_codex_installed() -> bool:
     return shutil.which("mlflow-codex") is not None
 
 
+def _is_sky_computer_use_notify(notify_value: object) -> bool:
+    """Return True if `notify` is Codex Desktop's SkyComputerUseClient wrapper."""
+    if not isinstance(notify_value, list) or not notify_value:
+        return False
+    return "SkyComputerUseClient" in str(notify_value[0])
+
+
 def _is_owned_notify(notify_value: object) -> bool:
-    """Return True if a `notify` array belongs to @mlflow/codex or legacy claudetracing."""
+    """Return True if a `notify` array invokes @mlflow/codex or claudetracing.codex."""
     if not isinstance(notify_value, list):
         return False
     items = [str(x) for x in notify_value]
-    if any("mlflow-codex" in item for item in items):
-        return True
-    return len(items) >= 3 and "claudetracing.codex" in items
+    return any(
+        "mlflow-codex" in item or "claudetracing.codex" in item for item in items
+    )
 
 
 def _write_notify_to_toml(
@@ -89,29 +103,36 @@ def _write_notify_to_toml(
     doc = tomlkit.parse(original) if original.strip() else tomlkit.document()
 
     existing_notify = doc.get("notify")
-    if existing_notify is not None and not _is_owned_notify(existing_notify):
-        items = (
-            [str(x) for x in existing_notify]
-            if isinstance(existing_notify, list)
-            else []
-        )
-        # Support Codex Desktop's SkyComputerUseClient wrapper via --previous-notify
-        if items and "SkyComputerUseClient" in items[0]:
-            new_items = list(items)
-            prev_json = json.dumps(target_cmd)
-            if "--previous-notify" in new_items:
-                idx = new_items.index("--previous-notify")
-                if idx + 1 < len(new_items):
+    if _is_sky_computer_use_notify(existing_notify):
+        items = [str(x) for x in existing_notify]  # type: ignore[union-attr]
+        new_items = list(items)
+        prev_json = json.dumps(target_cmd)
+        if "--previous-notify" in new_items:
+            idx = new_items.index("--previous-notify")
+            if idx + 1 < len(new_items):
+                existing_prev = new_items[idx + 1]
+                if (
+                    "mlflow-codex" in existing_prev
+                    or "claudetracing.codex" in existing_prev
+                ):
                     new_items[idx + 1] = prev_json
+                elif strict_custom:
+                    raise ValueError(
+                        f"{config_path} already has a custom `--previous-notify` entry ({existing_prev!r})."
+                    )
                 else:
-                    new_items.append(prev_json)
+                    return
             else:
-                new_items.extend(["--previous-notify", prev_json])
-            doc["notify"] = new_items
-            rendered = tomlkit.dumps(doc)
-            tomlkit.parse(rendered)
-            config_path.write_text(rendered, encoding="utf-8")
-            return
+                new_items.append(prev_json)
+        else:
+            new_items.extend(["--previous-notify", prev_json])
+        doc["notify"] = new_items
+        rendered = tomlkit.dumps(doc)
+        tomlkit.parse(rendered)
+        config_path.write_text(rendered, encoding="utf-8")
+        return
+
+    if existing_notify is not None and not _is_owned_notify(existing_notify):
         if strict_custom:
             raise ValueError(
                 f"{config_path} already has a custom `notify` entry ({existing_notify!r}). "
@@ -143,6 +164,7 @@ def configure_codex(
     experiment_id: str = "0",
     trace_location: str | None = None,
     *,
+    tracking_token: str | None = None,
     project_local: bool = True,
 ) -> tuple[Path, Path]:
     """Configure Codex CLI tracing in `.codex/config.toml` and `.codex/mlflow-tracing.json`.
@@ -157,8 +179,6 @@ def configure_codex(
     Returns:
         Tuple of `(config_toml_path, mlflow_tracing_json_path)`.
     """
-    import sys
-
     codex_dir = resolve_codex_dir(project_root, project_local=project_local)
     codex_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,6 +201,7 @@ def configure_codex(
         tracking_uri=tracking_uri,
         experiment_id=str(experiment_id),
         trace_location=trace_location,
+        tracking_token=tracking_token,
     )
     tracing_path.write_text(
         json.dumps(
@@ -244,6 +265,35 @@ def get_codex_status(project_root: Path | None = None) -> CodexStatus:
     )
 
 
+def _remove_notify_from_toml(config_path: Path) -> bool:
+    """Remove owned notify hook (or unchain from SkyComputerUseClient) in a TOML file."""
+    if not config_path.exists():
+        return False
+    try:
+        doc = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+        existing = doc.get("notify")
+        if _is_sky_computer_use_notify(existing) and _is_owned_notify(existing):
+            items = [str(x) for x in existing]  # type: ignore[union-attr]
+            if "--previous-notify" in items:
+                idx = items.index("--previous-notify")
+                del items[idx : idx + 2]
+                doc["notify"] = items
+                config_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+                return True
+            return False
+        if _is_owned_notify(existing):
+            del doc["notify"]
+            rendered = tomlkit.dumps(doc).strip()
+            if rendered:
+                config_path.write_text(rendered + "\n", encoding="utf-8")
+            else:
+                config_path.unlink()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def disable_codex(
     project_root: Path | None = None, *, project_local: bool = True
 ) -> bool:
@@ -257,30 +307,21 @@ def disable_codex(
         tracing_path.unlink()
         changed = True
 
-    if config_path.exists():
-        try:
-            doc = tomlkit.parse(config_path.read_text(encoding="utf-8"))
-            if _is_owned_notify(doc.get("notify")):
-                del doc["notify"]
-                rendered = tomlkit.dumps(doc).strip()
-                if rendered:
-                    config_path.write_text(rendered + "\n", encoding="utf-8")
-                else:
-                    config_path.unlink()
-                changed = True
-        except Exception:
-            pass
+    if _remove_notify_from_toml(config_path):
+        changed = True
 
     return changed
 
 
 def run_codex_hook(payload: str, project_root: Path | None = None) -> int:
     """Populate tracing environment variables and delegate to `mlflow-codex notify-hook`."""
-    import subprocess
     from claudetracing.setup import load_tracing_env
 
+    if not payload or not payload.strip():
+        return 0
+
     cwd = project_root
-    if cwd is None and payload:
+    if cwd is None:
         try:
             data = json.loads(payload)
             if isinstance(data, dict) and data.get("cwd"):
@@ -304,7 +345,8 @@ def run_codex_hook(payload: str, project_root: Path | None = None) -> int:
 
 
 if __name__ == "__main__":
-    import sys
-
-    payload_arg = sys.argv[-1] if len(sys.argv) >= 2 else ""
+    args = sys.argv[1:]
+    if args and args[0] == "notify-hook":
+        args = args[1:]
+    payload_arg = args[0] if args else ""
     raise SystemExit(run_codex_hook(payload_arg))

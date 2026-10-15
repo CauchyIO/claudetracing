@@ -75,6 +75,9 @@ jobs:
     # never tag, release, or publish.
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'CauchyIO/claudetracing'
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-master
+      cancel-in-progress: false
     permissions:
       contents: write  # the tag and the GitHub release
       id-token: write  # PyPI trusted publishing

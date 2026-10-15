@@ -9,7 +9,9 @@ import tempfile
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 AGY_HOOK_NAME = "mlflow-tracing"
-AGY_HOOK_CMD_STOP = "cd .. && (traces agy-hook || uv run traces agy-hook)"
+AGY_HOOK_CMD_STOP = (
+    '[ "${PWD##*/}" = ".agents" ] && cd ..; traces agy-hook || uv run traces agy-hook'
+)
 _USER_REQUEST_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.DOTALL)
 
 
@@ -138,10 +140,12 @@ def get_agy_status(project_root: Path | None = None) -> AgyTracingStatus:
     experiment_name: str | None = None
     if tracing_file.exists():
         try:
-            raw = json.loads(tracing_file.read_text(encoding="utf-8"))
-            tracking_uri = raw.get("trackingUri")
-            experiment_id = raw.get("experimentId")
-            experiment_name = raw.get("experimentName")
+            cfg = AgyTracingConfig.model_validate_json(
+                tracing_file.read_text(encoding="utf-8")
+            )
+            tracking_uri = cfg.tracking_uri
+            experiment_id = cfg.experiment_id
+            experiment_name = cfg.experiment_name
         except Exception:
             pass
 
@@ -209,7 +213,7 @@ def convert_agy_transcript(
             if line:
                 steps.append(json.loads(line))
 
-    model = model_name or "antigravity"
+    default_model = model_name or "antigravity"
     claude_entries: list[dict] = []
 
     i = 0
@@ -236,15 +240,45 @@ def convert_agy_transcript(
             continue
 
         if stype == "PLANNER_RESPONSE":
+            step_model = str(step.get("model") or default_model)
+            raw_usage = step.get("usage")
+            nested_usage = raw_usage if isinstance(raw_usage, dict) else {}
             usage: dict[str, int] = {}
-            if step.get("input_tokens") is not None:
-                usage["input_tokens"] = int(step["input_tokens"])
-            if step.get("output_tokens") is not None:
-                usage["output_tokens"] = int(step["output_tokens"])
-            if step.get("cache_read_tokens") is not None:
-                usage["cache_read_input_tokens"] = int(step["cache_read_tokens"])
+            in_tok = (
+                nested_usage.get("input_tokens")
+                if nested_usage.get("input_tokens") is not None
+                else step.get("input_tokens")
+            )
+            out_tok = (
+                nested_usage.get("output_tokens")
+                if nested_usage.get("output_tokens") is not None
+                else step.get("output_tokens")
+            )
+            cache_read = (
+                nested_usage.get("cache_read_input_tokens")
+                if nested_usage.get("cache_read_input_tokens") is not None
+                else (
+                    nested_usage.get("cache_read_tokens")
+                    if nested_usage.get("cache_read_tokens") is not None
+                    else step.get("cache_read_tokens")
+                )
+            )
+            cache_create = (
+                nested_usage.get("cache_creation_input_tokens")
+                if nested_usage.get("cache_creation_input_tokens") is not None
+                else step.get("cache_creation_input_tokens")
+            )
+            if in_tok is not None:
+                usage["input_tokens"] = int(in_tok)
+            if out_tok is not None:
+                usage["output_tokens"] = int(out_tok)
+            if cache_read is not None:
+                usage["cache_read_input_tokens"] = int(cache_read)
+            if cache_create is not None:
+                usage["cache_creation_input_tokens"] = int(cache_create)
 
             tool_calls = step.get("tool_calls") or []
+            thinking = str(step.get("thinking") or "")
             text = str(step.get("content") or "")
 
             # Collect subsequent GENERIC steps that hold tool call outputs
@@ -254,13 +288,50 @@ def convert_agy_transcript(
                 generic_outputs.append(steps[j])
                 j += 1
 
+            # Emit thinking / text blocks first so chronological order before tool results is preserved
+            text_parts: list[dict] = []
+            if thinking.strip():
+                text_parts.append({"type": "thinking", "thinking": thinking})
+            if text.strip():
+                text_parts.append({"type": "text", "text": text})
+            if text_parts:
+                text_msg: dict = {
+                    "role": "assistant",
+                    "model": step_model,
+                    "content": text_parts,
+                }
+                if usage:
+                    text_msg["usage"] = usage
+                claude_entries.append(
+                    {
+                        "type": "assistant",
+                        "timestamp": timestamp,
+                        "message": text_msg,
+                    }
+                )
+
             if tool_calls:
                 tool_parts: list[dict] = []
+                call_ids: list[str] = []
                 for idx, tc in enumerate(tool_calls):
-                    call_id = f"agy_tc_{step.get('step_index', i)}_{idx}"
-                    args = tc.get("args", {})
-                    if not isinstance(args, dict):
-                        args = {"raw": str(args)}
+                    call_id = str(
+                        tc.get("id") or f"agy_tc_{step.get('step_index', i)}_{idx}"
+                    )
+                    call_ids.append(call_id)
+                    raw_args = (
+                        tc.get("arguments")
+                        if tc.get("arguments") is not None
+                        else tc.get("args", {})
+                    )
+                    if isinstance(raw_args, str):
+                        try:
+                            args = json.loads(raw_args)
+                        except json.JSONDecodeError:
+                            args = {"raw": raw_args}
+                    elif isinstance(raw_args, dict):
+                        args = raw_args
+                    else:
+                        args = {"raw": str(raw_args)}
                     tool_parts.append(
                         {
                             "type": "tool_use",
@@ -272,10 +343,10 @@ def convert_agy_transcript(
 
                 msg_obj: dict = {
                     "role": "assistant",
-                    "model": model,
+                    "model": step_model,
                     "content": tool_parts,
                 }
-                if usage and not text.strip():
+                if usage and not text_parts:
                     msg_obj["usage"] = usage
 
                 claude_entries.append(
@@ -286,8 +357,7 @@ def convert_agy_transcript(
                     }
                 )
 
-                for idx, _tc in enumerate(tool_calls):
-                    call_id = f"agy_tc_{step.get('step_index', i)}_{idx}"
+                for idx, call_id in enumerate(call_ids):
                     gen = generic_outputs[idx] if idx < len(generic_outputs) else None
                     res_ts = gen.get("created_at") if gen else timestamp
                     res_content = str(gen.get("content", "")) if gen else "completed"
@@ -307,22 +377,6 @@ def convert_agy_transcript(
                             },
                         }
                     )
-
-            if text.strip():
-                text_msg: dict = {
-                    "role": "assistant",
-                    "model": model,
-                    "content": [{"type": "text", "text": text}],
-                }
-                if usage:
-                    text_msg["usage"] = usage
-                claude_entries.append(
-                    {
-                        "type": "assistant",
-                        "timestamp": timestamp,
-                        "message": text_msg,
-                    }
-                )
 
             i = j
             continue

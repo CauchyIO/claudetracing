@@ -144,6 +144,23 @@ def test_configure_codex_syncs_codex_home_and_chains_sky_client(
         expected_shim,
     ]
 
+    # Re-configuring should be idempotent and never clobber SkyComputerUseClient
+    configure_codex(project, tracking_uri="http://localhost:5000", experiment_id="2")
+    global_doc_again = tomlkit.parse(global_cfg.read_text(encoding="utf-8"))
+    assert list(global_doc_again["notify"]) == [
+        "/Applications/Codex.app/SkyComputerUseClient",
+        "turn-ended",
+        "--previous-notify",
+        expected_shim,
+    ]
+
     assert disable_codex(project) is True
     assert not (project / ".codex" / "mlflow-tracing.json").exists()
     assert get_codex_status(project).enabled is False
+
+    assert disable_codex(project_local=False) is True
+    global_doc_after = tomlkit.parse(global_cfg.read_text(encoding="utf-8"))
+    assert list(global_doc_after["notify"]) == [
+        "/Applications/Codex.app/SkyComputerUseClient",
+        "turn-ended",
+    ]

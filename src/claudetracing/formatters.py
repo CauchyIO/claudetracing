@@ -21,7 +21,7 @@ def to_summary(trace: TraceData) -> str:
         f"  Time: {summary.timestamp.isoformat() if summary.timestamp else 'N/A'}",
         f"  Status: {summary.status or 'N/A'}",
         f"  Duration: {summary.duration_ms:.0f}ms"
-        if summary.duration_ms
+        if summary.duration_ms is not None
         else "  Duration: N/A",
         f"  Spans: {summary.total_spans}",
     ]
@@ -109,7 +109,7 @@ def format_for_context(traces: list[TraceData], max_chars: int = 50000) -> str:
             f"\n## {summary.timestamp.strftime('%Y-%m-%d %H:%M') if summary.timestamp else 'Unknown time'}",
             f"ID: {summary.trace_id[:12]}...",
             f"Status: {summary.status or 'N/A'} | Duration: {summary.duration_ms:.0f}ms"
-            if summary.duration_ms
+            if summary.duration_ms is not None
             else f"Status: {summary.status or 'N/A'}",
         ]
 

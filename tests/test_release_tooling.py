@@ -14,7 +14,16 @@ from pathlib import Path
 import pytest
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
-GIT_IDENTITY = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
+GIT_IDENTITY = [
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "tag.gpgsign=false",
+]
 
 
 def git(repo: Path, *args: str) -> str:

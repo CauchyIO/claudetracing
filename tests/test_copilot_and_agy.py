@@ -142,7 +142,15 @@ def test_convert_copilot_transcript_and_cli_hook_creates_mlflow_trace(
             for line in converted_file.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        assert len(lines) == 4
+        assert len(lines) == 5
+        assert lines[1]["message"]["content"] == [
+            {
+                "type": "thinking",
+                "thinking": "Running git status.",
+            }
+        ]
+        assert lines[2]["message"]["content"][0]["type"] == "tool_use"
+        assert lines[2]["message"]["content"][0]["input"] == {"command": "git status"}
     finally:
         converted_file.unlink(missing_ok=True)
 
@@ -293,7 +301,23 @@ def test_convert_agy_transcript_and_stop_hook_creates_mlflow_trace(
             for line in converted_file.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        assert len(lines) == 4
+        assert len(lines) == 5
+        planner_msg = lines[1]["message"]
+        assert planner_msg["usage"] == {"input_tokens": 120, "output_tokens": 35}
+        assert planner_msg["content"] == [
+            {
+                "type": "thinking",
+                "thinking": "I will run ls.",
+            }
+        ]
+        assert lines[2]["message"]["content"] == [
+            {
+                "type": "tool_use",
+                "id": "agy-tc-1",
+                "name": "run_command",
+                "input": {"CommandLine": "ls -la"},
+            }
+        ]
     finally:
         converted_file.unlink(missing_ok=True)
 

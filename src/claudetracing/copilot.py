@@ -208,10 +208,30 @@ def convert_copilot_transcript(transcript_path: str | Path) -> str:
                 )
         elif etype == "assistant.message":
             text = data.get("content", "")
+            reasoning = data.get("reasoningText", "")
             tool_requests = data.get("toolRequests", [])
             model = data.get("model") or entry.get("model") or "copilot"
 
-            # Emit tool_use blocks first if present, paired with their tool_result entries
+            # Emit thinking / text blocks first so chronological order before tool results is preserved
+            text_parts: list[dict] = []
+            if reasoning and str(reasoning).strip():
+                text_parts.append({"type": "thinking", "thinking": str(reasoning)})
+            if text and str(text).strip():
+                text_parts.append({"type": "text", "text": str(text)})
+            if text_parts:
+                claude_entries.append(
+                    {
+                        "type": "assistant",
+                        "timestamp": timestamp,
+                        "message": {
+                            "role": "assistant",
+                            "model": model,
+                            "content": text_parts,
+                        },
+                    }
+                )
+
+            # Emit tool_use blocks paired with their tool_result entries
             if tool_requests:
                 tool_parts: list[dict] = []
                 for tr in tool_requests:
@@ -265,20 +285,6 @@ def convert_copilot_transcript(transcript_path: str | Path) -> str:
                             },
                         }
                     )
-
-            # Emit text block as its own assistant entry so process_transcript creates an LLM span
-            if text and text.strip():
-                claude_entries.append(
-                    {
-                        "type": "assistant",
-                        "timestamp": timestamp,
-                        "message": {
-                            "role": "assistant",
-                            "model": model,
-                            "content": [{"type": "text", "text": text}],
-                        },
-                    }
-                )
 
     tmp_dir = Path(tempfile.gettempdir()) / "copilot-traces"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -350,11 +356,29 @@ def run_copilot_stop(project_root: Path | None = None) -> None:
     try:
         hook_file_path = os.environ.get("_COPILOT_HOOK_FILE")
         if hook_file_path and Path(hook_file_path).exists():
-            hook_data = json.loads(Path(hook_file_path).read_text(encoding="utf-8"))
-            Path(hook_file_path).unlink(missing_ok=True)
-        else:
-            raw = sys.stdin.read().strip()
-            hook_data = json.loads(raw) if raw else {}
+            hf = Path(hook_file_path)
+            try:
+                setup_mlflow()
+                while hf.exists():
+                    read_mtime = hf.stat().st_mtime
+                    hook_data = json.loads(hf.read_text(encoding="utf-8"))
+                    session_id = hook_data.get("session_id")
+                    transcript_path = hook_data.get("transcript_path")
+                    if transcript_path and Path(transcript_path).exists():
+                        converted_path = convert_copilot_transcript(transcript_path)
+                        try:
+                            process_transcript(converted_path, session_id)
+                        finally:
+                            Path(converted_path).unlink(missing_ok=True)
+                    if not hf.exists() or hf.stat().st_mtime <= read_mtime:
+                        break
+            finally:
+                hf.unlink(missing_ok=True)
+            print(json.dumps(get_hook_response()))
+            return
+
+        raw = sys.stdin.read().strip()
+        hook_data = json.loads(raw) if raw else {}
 
         session_id = hook_data.get("session_id")
         transcript_path = hook_data.get("transcript_path")

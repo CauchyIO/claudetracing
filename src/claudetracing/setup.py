@@ -9,6 +9,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from claudetracing.agy import (
+    AgyTracingConfig,
     AgyTracingStatus,
     agy_tracing_config_path,
     configure_agy,
@@ -58,11 +59,23 @@ def _extract_env_dict(data: dict) -> dict[str, str]:
     return merged
 
 
+def _merge_env_layer(target: dict[str, str], source: dict[str, str]) -> None:
+    """Merge an env layer into target without letting bare 'databricks' clobber 'databricks://<profile>'."""
+    for k, v in source.items():
+        if (
+            k == "MLFLOW_TRACKING_URI"
+            and v == "databricks"
+            and target.get("MLFLOW_TRACKING_URI", "").startswith("databricks://")
+        ):
+            continue
+        target[k] = v
+
+
 def load_tracing_env(project_root: Path | None = None) -> None:
     """Populate os.environ with tracing settings from the project's agent configs.
 
     Precedence (highest first):
-      1. Existing os.environ
+      1. Existing os.environ (except bare 'databricks' upgraded by local 'databricks://<profile>')
       2. .claude/settings.local.json ('env', fallback 'environment')
       3. .claude/settings.json ('env', fallback 'environment')
       4. .github/hooks/mlflow-tracing.local.json & .github/hooks/mlflow-tracing.json
@@ -83,23 +96,27 @@ def load_tracing_env(project_root: Path | None = None) -> None:
             merged["MLFLOW_EXPERIMENT_ID"] = codex_cfg.experiment_id
         if codex_cfg.trace_location:
             merged["MLFLOW_TRACE_LOCATION"] = codex_cfg.trace_location
+        if codex_cfg.tracking_token:
+            merged["MLFLOW_TRACKING_TOKEN"] = codex_cfg.tracking_token
 
     # 5. Antigravity (.agents/mlflow-tracing.json)
     agy_cfg_file = agy_tracing_config_path(root)
     if agy_cfg_file.exists():
         try:
-            agy_raw = json.loads(agy_cfg_file.read_text(encoding="utf-8"))
-            if isinstance(agy_raw, dict):
-                merged["MLFLOW_CLAUDE_TRACING_ENABLED"] = "true"
-                if agy_raw.get("trackingUri"):
-                    merged["MLFLOW_TRACKING_URI"] = str(agy_raw["trackingUri"])
-                if agy_raw.get("experimentId"):
-                    merged["MLFLOW_EXPERIMENT_ID"] = str(agy_raw["experimentId"])
-                if agy_raw.get("experimentName"):
-                    merged["MLFLOW_EXPERIMENT_NAME"] = str(agy_raw["experimentName"])
-                if agy_raw.get("trackingToken"):
-                    merged["MLFLOW_TRACKING_TOKEN"] = str(agy_raw["trackingToken"])
-        except (json.JSONDecodeError, OSError):
+            agy_cfg = AgyTracingConfig.model_validate_json(
+                agy_cfg_file.read_text(encoding="utf-8")
+            )
+            agy_layer: dict[str, str] = {"MLFLOW_CLAUDE_TRACING_ENABLED": "true"}
+            if agy_cfg.tracking_uri:
+                agy_layer["MLFLOW_TRACKING_URI"] = agy_cfg.tracking_uri
+            if agy_cfg.experiment_id:
+                agy_layer["MLFLOW_EXPERIMENT_ID"] = agy_cfg.experiment_id
+            if agy_cfg.experiment_name:
+                agy_layer["MLFLOW_EXPERIMENT_NAME"] = agy_cfg.experiment_name
+            if agy_cfg.tracking_token:
+                agy_layer["MLFLOW_TRACKING_TOKEN"] = agy_cfg.tracking_token
+            _merge_env_layer(merged, agy_layer)
+        except Exception:
             pass
 
     # 4. GitHub Copilot (.github/hooks/mlflow-tracing.json + .local.json)
@@ -109,7 +126,9 @@ def load_tracing_env(project_root: Path | None = None) -> None:
             cp_data = json.loads(cp_cfg_file.read_text(encoding="utf-8"))
             for h in cp_data.get("hooks", {}).get("Stop", []):
                 if isinstance(h, dict) and isinstance(h.get("env"), dict):
-                    merged.update({str(k): str(v) for k, v in h["env"].items()})
+                    _merge_env_layer(
+                        merged, {str(k): str(v) for k, v in h["env"].items()}
+                    )
         except (json.JSONDecodeError, OSError):
             pass
     cp_local_file = copilot_local_config_path(root)
@@ -117,7 +136,9 @@ def load_tracing_env(project_root: Path | None = None) -> None:
         try:
             cp_local = json.loads(cp_local_file.read_text(encoding="utf-8"))
             if isinstance(cp_local.get("env"), dict):
-                merged.update({str(k): str(v) for k, v in cp_local["env"].items()})
+                _merge_env_layer(
+                    merged, {str(k): str(v) for k, v in cp_local["env"].items()}
+                )
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -130,7 +151,7 @@ def load_tracing_env(project_root: Path | None = None) -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        merged.update(_extract_env_dict(data))
+        _merge_env_layer(merged, _extract_env_dict(data))
 
     uri_val = merged.get("MLFLOW_TRACKING_URI", "")
     if uri_val.startswith("databricks://"):
@@ -139,7 +160,14 @@ def load_tracing_env(project_root: Path | None = None) -> None:
             merged.setdefault("DATABRICKS_CONFIG_PROFILE", extracted_prof)
 
     for key, value in merged.items():
-        os.environ.setdefault(key, value)
+        if (
+            key == "MLFLOW_TRACKING_URI"
+            and os.environ.get("MLFLOW_TRACKING_URI") == "databricks"
+            and value.startswith("databricks://")
+        ):
+            os.environ["MLFLOW_TRACKING_URI"] = value
+        else:
+            os.environ.setdefault(key, value)
 
 
 def load_settings(project_root: Path | None = None) -> dict | None:
@@ -361,26 +389,56 @@ def create_settings_file(
 
     settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
 
-    if profile and not spn:
+    effective_profile = profile
+    if (
+        not effective_profile
+        and not spn
+        and (tracking_uri or "").startswith("databricks://")
+    ):
+        extracted = (tracking_uri or "").removeprefix("databricks://").strip("/")
+        if extracted:
+            effective_profile = extracted
+
+    if effective_profile and not spn:
         _write_local_settings(
             project_root,
             {
-                "MLFLOW_TRACKING_URI": f"databricks://{profile}",
-                "DATABRICKS_CONFIG_PROFILE": profile,
+                "MLFLOW_TRACKING_URI": f"databricks://{effective_profile}",
+                "DATABRICKS_CONFIG_PROFILE": effective_profile,
             },
+            remove_keys=() if tracking_token else ("MLFLOW_TRACKING_TOKEN",),
         )
     elif tracking_token:
         _write_local_settings(
             project_root,
             {"MLFLOW_TRACKING_TOKEN": tracking_token},
+            remove_keys=("MLFLOW_TRACKING_URI", "DATABRICKS_CONFIG_PROFILE"),
+        )
+    else:
+        _write_local_settings(
+            project_root,
+            {},
+            remove_keys=(
+                "MLFLOW_TRACKING_URI",
+                "DATABRICKS_CONFIG_PROFILE",
+                "MLFLOW_TRACKING_TOKEN",
+            ),
         )
 
     return settings_path
 
 
-def _write_local_settings(project_root: Path, updates: dict[str, str]) -> Path:
+def _write_local_settings(
+    project_root: Path,
+    updates: dict[str, str],
+    *,
+    remove_keys: tuple[str, ...] = (),
+) -> Path | None:
     """Write machine-local env overrides into the gitignored .claude/settings.local.json."""
     local_path = project_root / ".claude" / "settings.local.json"
+    if not local_path.exists() and not updates:
+        return None
+
     data = (
         json.loads(local_path.read_text(encoding="utf-8"))
         if local_path.exists()
@@ -393,8 +451,19 @@ def _write_local_settings(project_root: Path, updates: dict[str, str]) -> Path:
     if isinstance(data.get(ENV_KEY), dict):
         env_block.update({str(k): str(v) for k, v in data[ENV_KEY].items()})
 
+    for k in remove_keys:
+        env_block.pop(k, None)
     env_block.update(updates)
-    data[ENV_KEY] = env_block
+
+    if env_block:
+        data[ENV_KEY] = env_block
+    else:
+        data.pop(ENV_KEY, None)
+
+    if not data:
+        local_path.unlink(missing_ok=True)
+        return None
+
     local_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return local_path
 
@@ -453,8 +522,17 @@ def update_gitignore(project_root: Path, *, yes: bool = False) -> bool:
         "mlruns/",
     ]
     existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    claude_dir_ignored = ".claude/" in existing_lines or ".claude" in existing_lines
 
-    to_add = [e for e in entries if e not in existing]
+    to_add: list[str] = []
+    for e in entries:
+        if e in existing_lines or e.rstrip("/") in existing_lines:
+            continue
+        if claude_dir_ignored and e.startswith(".claude/"):
+            continue
+        to_add.append(e)
+
     if not to_add:
         return False
 
@@ -491,11 +569,11 @@ def resolve_experiment(
 
     import mlflow
     from mlflow import MlflowClient
-    from mlflow.exceptions import MlflowException
 
     effective_uri = f"databricks://{profile}" if profile else tracking_uri
     saved_profile = os.environ.get("DATABRICKS_CONFIG_PROFILE")
     saved_token = os.environ.get("MLFLOW_TRACKING_TOKEN")
+    prev_uri = mlflow.get_tracking_uri()
 
     try:
         if profile:
@@ -510,10 +588,14 @@ def resolve_experiment(
             return True, experiment.experiment_id
         exp_id = client.create_experiment(experiment_name)
         return True, str(exp_id)
-    except (TimeoutError, MlflowException, ConnectionError, OSError) as e:
+    except Exception as e:
         print(f"{YELLOW}Connection check failed: {e}{RESET}")
         return False, None
     finally:
+        try:
+            mlflow.set_tracking_uri(prev_uri)
+        except Exception:
+            pass
         if profile:
             if saved_profile is None:
                 os.environ.pop("DATABRICKS_CONFIG_PROFILE", None)
@@ -746,6 +828,7 @@ def _apply_agent_configs(
                 tracking_uri=effective_uri,
                 experiment_id=codex_exp_id,
                 trace_location=trace_location,
+                tracking_token=tracking_token,
                 project_local=True,
             )
             print(
@@ -827,7 +910,6 @@ def run_setup(
                 experiment_name=exp_name,
                 experiment_id=experiment_id,
                 trace_location=trace_location,
-                install_plugin=not yes,
                 yes=yes,
             )
 
@@ -848,7 +930,6 @@ def run_setup(
                 experiment_name=exp_name,
                 experiment_id=resolved_id,
                 trace_location=trace_location,
-                install_plugin=not yes,
                 yes=yes,
             )
 
@@ -858,6 +939,13 @@ def run_setup(
                 f"Error: Invalid tracking URI '{uri}'. Expected 'databricks' or an http(s):// URL."
             )
             return 1
+
+        if (
+            uri.startswith("databricks")
+            and not experiment
+            and not exp_name.startswith("/Workspace/")
+        ):
+            exp_name = f"/Workspace/Shared/{exp_name}"
 
         resolved_id = experiment_id
         if not resolved_id and uri != "databricks":
@@ -873,7 +961,6 @@ def run_setup(
             experiment_id=resolved_id,
             tracking_token=tracking_token,
             trace_location=trace_location,
-            install_plugin=not yes,
             yes=yes,
         )
 

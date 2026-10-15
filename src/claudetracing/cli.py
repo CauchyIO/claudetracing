@@ -409,6 +409,17 @@ def search(
     )
     from claudetracing.setup import load_tracing_env
 
+    formatters = {
+        "summary": format_traces_summary,
+        "json": format_traces_json,
+        "context": format_for_context,
+        "tools": format_tool_usage,
+    }
+    if format not in formatters:
+        raise typer.BadParameter(
+            f"Invalid format '{format}'. Choose from: summary, json, context, tools."
+        )
+
     load_tracing_env()
     client = TracingClient()
 
@@ -419,7 +430,12 @@ def search(
             raise typer.Exit(1)
         traces = [trace]
     elif hours or since:
-        since_dt = datetime.fromisoformat(since) if since else None
+        normalized_since = (
+            since[:-1] + "+00:00" if since and since.endswith("Z") else since
+        )
+        since_dt = (
+            datetime.fromisoformat(normalized_since) if normalized_since else None
+        )
         traces = client.search_traces_by_time(
             experiment_name=experiment,
             experiment_id=experiment_id,
@@ -434,11 +450,7 @@ def search(
             max_results=limit,
         )
 
-    output = {
-        "json": format_traces_json,
-        "context": format_for_context,
-        "tools": format_tool_usage,
-    }.get(format, format_traces_summary)(traces)
+    output = formatters[format](traces)
 
     typer.echo(output)
 

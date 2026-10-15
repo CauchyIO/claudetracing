@@ -72,7 +72,7 @@ class TraceData(BaseModel):
             span.name
             for span in self.spans
             if (span.span_type or "").upper() == "TOOL"
-            or "tool" in span.name.lower()
+            or span.name.lower().startswith("tool_")
             or str(span.attributes.get("span_type", "")).lower() == "tool"
             or str(span.attributes.get("mlflow.spanType", "")).upper() == "TOOL"
         ]
