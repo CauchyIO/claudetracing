@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import cast
 
 import typer
 
@@ -27,7 +27,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def _main_callback(
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None,
         "--version",
         "-V",
@@ -47,19 +47,19 @@ def version_cmd() -> None:
 
 @app.command()
 def init(
-    agent: Optional[str] = typer.Option(
+    agent: str | None = typer.Option(
         None,
         "--agent",
         "-a",
         help="Agent(s) to configure: 'all', 'both', 'claude', 'codex', 'copilot', or 'agy' (prompted if omitted).",
     ),
-    tracking_uri: Optional[str] = typer.Option(
+    tracking_uri: str | None = typer.Option(
         None,
         "--tracking-uri",
         "-u",
         help="MLflow tracking URI (e.g., 'databricks', 'http://localhost:5000', 'https://mlflow.example.com').",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None,
         "--profile",
         "-p",
@@ -70,23 +70,23 @@ def init(
         "--spn",
         help="Configure headless service-principal auth (credentials come from DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET).",
     ),
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None,
         "--experiment",
         "-e",
         help="MLflow experiment name or Databricks workspace path.",
     ),
-    experiment_id: Optional[str] = typer.Option(
+    experiment_id: str | None = typer.Option(
         None,
         "--experiment-id",
         help="Explicit MLflow experiment ID.",
     ),
-    token: Optional[str] = typer.Option(
+    token: str | None = typer.Option(
         None,
         "--token",
         help="Bearer token (MLFLOW_TRACKING_TOKEN) for a self-hosted MLflow server.",
     ),
-    trace_location: Optional[str] = typer.Option(
+    trace_location: str | None = typer.Option(
         None,
         "--trace-location",
         help="Optional Unity Catalog trace location in 'catalog.schema.table_prefix' format.",
@@ -99,7 +99,6 @@ def init(
     ),
 ):
     """Initialize MLflow tracing for coding agents in the current project."""
-    from typing import cast
     from claudetracing.setup import VALID_AGENTS, AgentChoice, run_setup
 
     normalized_agent = agent
@@ -138,8 +137,10 @@ def _single_agent_init(
     profile: str | None,
     trace_location: str | None,
     yes: bool,
+    *,
+    token: str | None = None,
+    spn: bool = False,
 ) -> None:
-    from typing import cast
     from claudetracing.setup import LOCAL_DEFAULT_URI, AgentChoice, run_setup
 
     if profile and tracking_uri:
@@ -156,38 +157,46 @@ def _single_agent_init(
 
     raise SystemExit(
         run_setup(
+            spn=spn,
             agent=cast(AgentChoice, target_agent),
             tracking_uri=uri,
             profile=profile,
             experiment=exp,
             experiment_id=experiment_id,
+            tracking_token=token,
             trace_location=trace_location,
-            yes=True,
+            yes=yes,
         )
     )
 
 
 @codex_app.command("init")
 def codex_init(
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None, "--experiment", "-e", help="MLflow experiment name/path"
     ),
-    experiment_id: Optional[str] = typer.Option(
+    experiment_id: str | None = typer.Option(
         None, "--experiment-id", help="Explicit MLflow experiment ID"
     ),
-    tracking_uri: Optional[str] = typer.Option(
+    tracking_uri: str | None = typer.Option(
         None,
         "--tracking-uri",
         "-u",
         help="MLflow tracking URI (defaults to http://localhost:5000)",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None, "--profile", "-p", help="Databricks OAuth/CLI profile"
     ),
-    trace_location: Optional[str] = typer.Option(
+    trace_location: str | None = typer.Option(
         None,
         "--trace-location",
         help="Unity Catalog trace location (catalog.schema.table_prefix)",
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip interactive confirmation"
@@ -204,25 +213,33 @@ def codex_init(
         profile,
         trace_location,
         yes,
+        token=token,
+        spn=spn,
     )
 
 
 @copilot_app.command("init")
 def copilot_init(
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None, "--experiment", "-e", help="MLflow experiment name/path"
     ),
-    experiment_id: Optional[str] = typer.Option(
+    experiment_id: str | None = typer.Option(
         None, "--experiment-id", help="Explicit MLflow experiment ID"
     ),
-    tracking_uri: Optional[str] = typer.Option(
+    tracking_uri: str | None = typer.Option(
         None,
         "--tracking-uri",
         "-u",
         help="MLflow tracking URI (defaults to http://localhost:5000)",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None, "--profile", "-p", help="Databricks OAuth/CLI profile"
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip interactive confirmation"
@@ -239,25 +256,33 @@ def copilot_init(
         profile,
         None,
         yes,
+        token=token,
+        spn=spn,
     )
 
 
 @agy_app.command("init")
 def agy_init(
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None, "--experiment", "-e", help="MLflow experiment name/path"
     ),
-    experiment_id: Optional[str] = typer.Option(
+    experiment_id: str | None = typer.Option(
         None, "--experiment-id", help="Explicit MLflow experiment ID"
     ),
-    tracking_uri: Optional[str] = typer.Option(
+    tracking_uri: str | None = typer.Option(
         None,
         "--tracking-uri",
         "-u",
         help="MLflow tracking URI (defaults to http://localhost:5000)",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None, "--profile", "-p", help="Databricks OAuth/CLI profile"
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip interactive confirmation"
@@ -274,6 +299,8 @@ def agy_init(
         profile,
         None,
         yes,
+        token=token,
+        spn=spn,
     )
 
 
@@ -381,21 +408,19 @@ def disable():
 
 @app.command()
 def search(
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None, "-e", "--experiment", help="Experiment name"
     ),
-    experiment_id: Optional[str] = typer.Option(
+    experiment_id: str | None = typer.Option(
         None, "--experiment-id", help="Experiment ID"
     ),
     limit: int = typer.Option(10, "-l", "--limit", help="Max traces to return"),
-    hours: Optional[int] = typer.Option(None, help="Search last N hours"),
-    since: Optional[str] = typer.Option(
-        None, help="Search since datetime (ISO format)"
-    ),
+    hours: int | None = typer.Option(None, help="Search last N hours"),
+    since: str | None = typer.Option(None, help="Search since datetime (ISO format)"),
     format: str = typer.Option(
         "summary", "-f", "--format", help="Output: summary|json|context|tools"
     ),
-    trace_id: Optional[str] = typer.Option(
+    trace_id: str | None = typer.Option(
         None, "--trace-id", help="Get specific trace by ID"
     ),
 ):

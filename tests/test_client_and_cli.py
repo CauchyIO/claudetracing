@@ -9,6 +9,7 @@ import mlflow
 from mlflow import MlflowClient
 from typer.testing import CliRunner
 
+from claudetracing import __version__
 from claudetracing.cli import app
 from claudetracing.client import TracingClient
 from claudetracing.formatters import (
@@ -157,10 +158,35 @@ def test_cli_init_status_list_search_and_disable(tmp_path: Path, monkeypatch):
     assert "Disabled GitHub Copilot tracing." in res_disable.stdout
     assert "Disabled Antigravity (agy) tracing." in res_disable.stdout
 
+    expected_version = f"claudetracing {__version__}"
+
     res_ver_flag = runner.invoke(app, ["--version"])
     assert res_ver_flag.exit_code == 0
-    assert "claudetracing 0.6.0" in res_ver_flag.stdout
+    assert expected_version in res_ver_flag.stdout
 
     res_ver_cmd = runner.invoke(app, ["version"])
     assert res_ver_cmd.exit_code == 0
-    assert "claudetracing 0.6.0" in res_ver_cmd.stdout
+    assert expected_version in res_ver_cmd.stdout
+
+
+def test_search_invalid_format_exits_nonzero(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+
+    res = runner.invoke(app, ["search", "-f", "invalid_fmt"])
+    assert res.exit_code != 0
+
+
+def test_search_since_trailing_z(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    _seed_trace(uri, "z-test-exp")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "z-test-exp")
+
+    res = runner.invoke(
+        app,
+        ["search", "--since", "2026-10-15T00:00:00Z", "-e", "z-test-exp"],
+    )
+    assert res.exit_code == 0

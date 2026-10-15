@@ -57,16 +57,23 @@ traces init --agent all --spn --experiment /Workspace/Shared/my-project --yes
 # Self-hosted MLflow server (with optional bearer token saved to gitignored local config files)
 traces init --agent all --tracking-uri https://mlflow.example.com --experiment my-project --token $MLFLOW_TRACKING_TOKEN --yes
 
-# Configure a specific agent
+# Configure a specific agent (--agent aliases: ghcp → copilot, antigravity → agy)
 traces init --agent claude --tracking-uri https://mlflow.example.com --experiment my-project --yes
 traces init --agent codex --tracking-uri https://mlflow.example.com --experiment my-project --yes
 traces init --agent copilot --tracking-uri https://mlflow.example.com --experiment my-project --yes
 traces init --agent agy --tracking-uri https://mlflow.example.com --experiment my-project --yes
+
+# Pass an existing experiment ID instead of a name (skips create-or-resolve)
+traces init --agent all --tracking-uri http://localhost:5000 --experiment-id 42 --yes
+
+# Override the trace storage location (MLflow artifact root)
+traces init --agent all --tracking-uri http://localhost:5000 --experiment my-project --trace-location s3://bucket/traces --yes
 ```
 
 ## CLI Commands
 
 ```bash
+traces --version                 # Print installed version (also: traces -V, traces version)
 traces init                      # Interactive or flag-based setup for Claude, Codex, Copilot & AGY
 traces codex init                # Shortcut to configure Codex CLI only
 traces copilot init              # Shortcut to configure GitHub Copilot only
@@ -76,7 +83,10 @@ traces disable                   # Disable tracing in the current project across
 traces list                      # List available experiments
 traces search                    # Search recent traces in the project's experiment
 traces search -e <experiment>    # Filter by experiment name
+traces search --experiment-id <id>  # Filter by experiment ID (numeric)
 traces search --hours 24         # Search last 24 hours
+traces search --since 2026-10-01T00:00:00  # Search since an ISO-8601 timestamp
+traces search --limit 50         # Return at most 50 traces (also: -l 50)
 traces search --trace-id <id>    # Get specific trace by ID
 traces search -f json            # Output as JSON
 traces search -f context         # LLM-optimized format

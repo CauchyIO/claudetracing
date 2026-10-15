@@ -164,3 +164,44 @@ def test_configure_codex_syncs_codex_home_and_chains_sky_client(
         "/Applications/Codex.app/SkyComputerUseClient",
         "turn-ended",
     ]
+
+
+def test_configure_codex_sky_client_preserves_custom_previous_notify(
+    tmp_path: Path, monkeypatch
+):
+    """SkyComputerUseClient chained with user's custom --previous-notify is never overwritten."""
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    global_cfg = codex_home / "config.toml"
+    global_cfg.write_text(
+        'notify = ["/Applications/Codex.app/SkyComputerUseClient", '
+        '"turn-ended", "--previous-notify", \'["my-custom-hook"]\']\n',
+        encoding="utf-8",
+    )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_codex(project, tracking_uri="http://localhost:5000", experiment_id="1")
+
+    global_doc = tomlkit.parse(global_cfg.read_text(encoding="utf-8"))
+    items = list(global_doc["notify"])
+    assert items[0] == "/Applications/Codex.app/SkyComputerUseClient"
+    assert items[2] == "--previous-notify"
+    assert '["my-custom-hook"]' in items[3]
+
+
+def test_configure_codex_writes_tracking_token(tmp_path: Path, monkeypatch):
+    """Passing tracking_token writes 'trackingToken' to .codex/mlflow-tracing.json."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+    project = tmp_path / "project"
+    project.mkdir()
+
+    _, tracing_path = configure_codex(
+        project,
+        tracking_uri="https://mlflow.example.com",
+        experiment_id="10",
+        tracking_token="tok-xyz",
+    )
+    tracing_data = json.loads(tracing_path.read_text(encoding="utf-8"))
+    assert tracing_data["trackingToken"] == "tok-xyz"

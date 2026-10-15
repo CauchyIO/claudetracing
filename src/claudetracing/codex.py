@@ -111,10 +111,7 @@ def _write_notify_to_toml(
             idx = new_items.index("--previous-notify")
             if idx + 1 < len(new_items):
                 existing_prev = new_items[idx + 1]
-                if (
-                    "mlflow-codex" in existing_prev
-                    or "claudetracing.codex" in existing_prev
-                ):
+                if _is_owned_notify([existing_prev]):
                     new_items[idx + 1] = prev_json
                 elif strict_custom:
                     raise ValueError(

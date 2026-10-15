@@ -992,7 +992,7 @@ def run_setup(
         selected_agent = agent
 
     if spn:
-        return setup_spn(agent=selected_agent)
+        return setup_spn(agent=selected_agent, trace_location=trace_location)
 
     storage_type = prompt_choice(
         "\nWhere should traces be stored?",
@@ -1004,13 +1004,19 @@ def run_setup(
     )
 
     if storage_type == 0:
-        return setup_databricks(agent=selected_agent)
+        return setup_databricks(agent=selected_agent, trace_location=trace_location)
     if storage_type == 1:
-        return setup_self_hosted(agent=selected_agent)
-    return setup_local(agent=selected_agent)
+        return setup_self_hosted(
+            agent=selected_agent,
+            trace_location=trace_location,
+            tracking_token=tracking_token,
+        )
+    return setup_local(agent=selected_agent, trace_location=trace_location)
 
 
-def setup_spn(agent: AgentChoice = "claude") -> int:
+def setup_spn(
+    agent: AgentChoice = "claude", *, trace_location: str | None = None
+) -> int:
     """Configure headless service-principal tracing — no local profile, no secrets on disk."""
     project_root = Path.cwd().resolve()
     print("\nService-principal / headless tracing.")
@@ -1036,6 +1042,7 @@ def setup_spn(agent: AgentChoice = "claude") -> int:
         spn=True,
         tracking_uri="databricks",
         experiment_name=experiment_path,
+        trace_location=trace_location,
     )
     if rc != 0:
         return rc
@@ -1051,7 +1058,12 @@ def setup_spn(agent: AgentChoice = "claude") -> int:
     return 0
 
 
-def setup_self_hosted(agent: AgentChoice = "both") -> int:
+def setup_self_hosted(
+    agent: AgentChoice = "both",
+    *,
+    trace_location: str | None = None,
+    tracking_token: str | None = None,
+) -> int:
     """Setup self-hosted MLflow tracking server (http:// or https://)."""
     project_root = Path.cwd().resolve()
 
@@ -1088,7 +1100,8 @@ def setup_self_hosted(agent: AgentChoice = "both") -> int:
         tracking_uri=uri,
         experiment_name=exp_name,
         experiment_id=exp_id,
-        tracking_token=token or None,
+        tracking_token=token or tracking_token,
+        trace_location=trace_location,
     )
     if rc != 0:
         return rc
@@ -1098,7 +1111,9 @@ def setup_self_hosted(agent: AgentChoice = "both") -> int:
     return 0
 
 
-def setup_local(agent: AgentChoice = "both") -> int:
+def setup_local(
+    agent: AgentChoice = "both", *, trace_location: str | None = None
+) -> int:
     """Setup local MLflow tracking server (http://localhost:5000)."""
     project_root = Path.cwd().resolve()
     uri = prompt("Local MLflow Server URL", default=LOCAL_DEFAULT_URI)
@@ -1124,6 +1139,7 @@ def setup_local(agent: AgentChoice = "both") -> int:
         tracking_uri=uri,
         experiment_name=exp_name,
         experiment_id=exp_id,
+        trace_location=trace_location,
     )
     if rc != 0:
         return rc
@@ -1134,7 +1150,9 @@ def setup_local(agent: AgentChoice = "both") -> int:
     return 0
 
 
-def setup_databricks(agent: AgentChoice = "both") -> int:
+def setup_databricks(
+    agent: AgentChoice = "both", *, trace_location: str | None = None
+) -> int:
     """Setup Databricks MLflow storage."""
     try:
         subprocess.run(["databricks", "--version"], capture_output=True, check=True)
@@ -1198,6 +1216,7 @@ def setup_databricks(agent: AgentChoice = "both") -> int:
         tracking_uri="databricks",
         experiment_name=experiment_path,
         experiment_id=exp_id,
+        trace_location=trace_location,
     )
     if rc != 0:
         return rc

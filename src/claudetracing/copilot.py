@@ -179,7 +179,7 @@ def convert_copilot_transcript(transcript_path: str | Path) -> str:
     tool_completions: dict[str, dict] = {}
     for entry in entries:
         if entry.get("type") == "tool.execution_complete":
-            data = entry.get("data", {})
+            data = entry.get("data") or {}
             tool_call_id = data.get("toolCallId", "")
             if tool_call_id:
                 tool_completions[tool_call_id] = {
@@ -191,7 +191,7 @@ def convert_copilot_transcript(transcript_path: str | Path) -> str:
     for entry in entries:
         etype = entry.get("type", "")
         timestamp = entry.get("timestamp")
-        data = entry.get("data", {})
+        data = entry.get("data") or {}
 
         if etype == "user.message":
             content = data.get("content", "")

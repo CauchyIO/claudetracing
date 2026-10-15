@@ -285,6 +285,84 @@ def test_is_valid_tracking_uri():
     assert is_valid_tracking_uri("ftp://example.com") is False
 
 
+def test_load_tracing_env_upgrades_bare_databricks_from_local_config(
+    tmp_path: Path, monkeypatch
+):
+    """When os.environ has bare 'databricks' and local config has 'databricks://my-prof',
+    load_tracing_env() upgrades to the profile URI and sets DATABRICKS_CONFIG_PROFILE."""
+    for key in list(os.environ):
+        if key.startswith(("MLFLOW_", "DATABRICKS_")):
+            monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks")
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"env": {"MLFLOW_TRACKING_URI": "databricks"}}),
+        encoding="utf-8",
+    )
+
+    hooks_dir = tmp_path / ".github" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "mlflow-tracing.local.json").write_text(
+        json.dumps({"env": {"MLFLOW_TRACKING_URI": "databricks://my-prof"}}),
+        encoding="utf-8",
+    )
+
+    load_tracing_env(project_root=tmp_path)
+
+    assert os.environ["MLFLOW_TRACKING_URI"] == "databricks://my-prof"
+    assert os.environ["DATABRICKS_CONFIG_PROFILE"] == "my-prof"
+
+
+def test_create_settings_file_removes_stale_profile_and_extracts_url_prof(
+    tmp_path: Path,
+):
+    """Reconfiguring from profile to spn removes stale DATABRICKS_CONFIG_PROFILE;
+    passing tracking_uri='databricks://url-prof' extracts profile into local settings."""
+    create_settings_file(
+        profile="old-prof",
+        experiment_path="/Workspace/Shared/exp",
+        project_root=tmp_path,
+        experiment_id="1",
+    )
+    local_before = json.loads(
+        (tmp_path / ".claude" / "settings.local.json").read_text(encoding="utf-8")
+    )
+    assert local_before["env"]["DATABRICKS_CONFIG_PROFILE"] == "old-prof"
+
+    create_settings_file(
+        profile=None,
+        experiment_path="/Workspace/Shared/exp",
+        project_root=tmp_path,
+        spn=True,
+    )
+    settings_after = json.loads(
+        (tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert "DATABRICKS_CONFIG_PROFILE" not in settings_after["env"]
+    assert not (tmp_path / ".claude" / "settings.local.json").exists()
+
+    create_settings_file(
+        profile=None,
+        experiment_path="/Workspace/Shared/exp",
+        project_root=tmp_path,
+        tracking_uri="databricks://url-prof",
+    )
+    local_extracted = json.loads(
+        (tmp_path / ".claude" / "settings.local.json").read_text(encoding="utf-8")
+    )
+    assert local_extracted["env"]["MLFLOW_TRACKING_URI"] == "databricks://url-prof"
+    assert local_extracted["env"]["DATABRICKS_CONFIG_PROFILE"] == "url-prof"
+
+    committed = json.loads(
+        (tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert committed["env"]["MLFLOW_TRACKING_URI"] == "databricks"
+    assert "DATABRICKS_CONFIG_PROFILE" not in committed["env"]
+
+
 def test_get_databricks_profiles(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert get_databricks_profiles() == []

@@ -2,7 +2,9 @@
 
 import json
 import os
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from mlflow import MlflowClient
 from typer.testing import CliRunner
@@ -341,3 +343,78 @@ def test_convert_agy_transcript_and_stop_hook_creates_mlflow_trace(
     assert len(traces) == 1
     span_names = [s.name for s in traces[0].data.spans]
     assert "tool_run_command" in span_names
+
+
+def test_copilot_async_debounce_and_worker_lifecycle(tmp_path: Path, monkeypatch):
+    """Async mode spawns Popen once; a second call within debounce writes hook file but skips Popen.
+    Worker mode (_COPILOT_HOOK_FILE) calls process_transcript and cleans up the hook file.
+    """
+    from claudetracing.copilot import run_copilot_stop
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COPILOT_TRACE_ASYNC", "1")
+    monkeypatch.delenv("_COPILOT_HOOK_FILE", raising=False)
+
+    configure_copilot(
+        project_root=tmp_path,
+        tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}",
+        experiment_name="async-test",
+        experiment_id="0",
+        async_mode=True,
+    )
+
+    events = [
+        {
+            "type": "user.message",
+            "id": "u-1",
+            "timestamp": "2026-10-15T12:00:00Z",
+            "parentId": None,
+            "data": {"content": "hello"},
+        },
+    ]
+    transcript_path = tmp_path / "transcript.jsonl"
+    transcript_path.write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+
+    hook_data = json.dumps(
+        {
+            "session_id": "sess-async",
+            "transcript_path": str(transcript_path),
+            "cwd": str(tmp_path),
+        }
+    )
+
+    mock_popen = MagicMock()
+    with (
+        patch("claudetracing.copilot.subprocess.Popen", mock_popen),
+        patch("sys.stdin") as mock_stdin,
+    ):
+        mock_stdin.read.return_value = hook_data
+        run_copilot_stop(project_root=tmp_path)
+
+    assert mock_popen.call_count == 1
+
+    hook_file = Path(tempfile.gettempdir()) / "copilot-traces" / "sess-async_hook.json"
+    assert hook_file.exists()
+
+    with (
+        patch("claudetracing.copilot.subprocess.Popen", mock_popen),
+        patch("sys.stdin") as mock_stdin,
+    ):
+        mock_stdin.read.return_value = hook_data
+        run_copilot_stop(project_root=tmp_path)
+
+    assert mock_popen.call_count == 1
+
+    monkeypatch.setenv("COPILOT_TRACE_ASYNC", "0")
+    monkeypatch.setenv("_COPILOT_HOOK_FILE", str(hook_file))
+    mock_process = MagicMock()
+    with (
+        patch("mlflow.claude_code.tracing.process_transcript", mock_process),
+        patch("mlflow.claude_code.tracing.setup_mlflow"),
+    ):
+        run_copilot_stop(project_root=tmp_path)
+
+    assert mock_process.call_count == 1
+    assert not hook_file.exists()
