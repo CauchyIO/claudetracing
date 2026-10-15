@@ -1,3 +1,3 @@
-"""Claude Code Tracing - MLflow tracing for Claude Code sessions."""
+"""Standardized MLflow tracing setup and CLI for Claude Code, Codex, Copilot, and Antigravity."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

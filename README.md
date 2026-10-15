@@ -1,4 +1,4 @@
-# Claude Code and Codex MLflow Tracing
+# Coding Agent MLflow Tracing (`claudetracing`)
 
 [![PyPI version](https://img.shields.io/pypi/v/claudetracing.svg)](https://pypi.org/project/claudetracing/)
 [![Python versions](https://img.shields.io/pypi/pyversions/claudetracing.svg)](https://pypi.org/project/claudetracing/)
@@ -6,8 +6,13 @@
 [![CI](https://github.com/CauchyIO/claudetracing/actions/workflows/ci.yml/badge.svg)](https://github.com/CauchyIO/claudetracing/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/CauchyIO/claudetracing/branch/master/graph/badge.svg)](https://codecov.io/gh/CauchyIO/claudetracing)
 
-A simple helper CLI to help you setup the MLFlow tracing in Claude Code in Databricks. While the MLFlow documentation already can set up claude code tracing for you with the command `mlflow autolog claude` this goes a step further in guiding you through the process such to make sure your experiments have the same naming convention as well as use the correct profile and prevent the use of a PAT.
+A lightweight helper CLI that standardizes MLflow Tracing setup across **Claude Code**, **OpenAI Codex CLI**, **GitHub Copilot** (`copilot` CLI / VS Code Copilot), and **Google Antigravity** (`agy` CLI / IDE).
 
+`claudetracing` streamlines team setup by:
+- **Configuring all four coding agents in one step** (`claude`, `codex`, `copilot`, `agy`) with the same experiment and backend.
+- **Standardizing experiment naming** (e.g., `/Workspace/Shared/<project>` on Databricks or resolving experiment names to IDs automatically across agents).
+- **Supporting Databricks, Self-Hosted MLflow Servers, and Local MLflow Servers** out of the box.
+- **Preventing credential/profile leaks in git** by storing machine-specific Databricks OAuth profiles and bearer tokens in gitignored `.local.json` / local config files while keeping project settings shareable across teammates and headless service-principal (SPN) environments.
 
 ## Installation
 
@@ -22,240 +27,100 @@ pip install claudetracing
 
 ## Quick Start
 
-Run the interactive setup in your project directory:
+Run the interactive setup wizard in your project directory:
 
 ```bash
 traces init
 ```
 
-This will:
-1. Authenticate with Databricks (or use existing credentials)
-2. Configure your experiment path (shared or personal)
-3. Create `.claude/settings.json` with the proper hooks
-4. Update `.gitignore`
+The wizard will guide you through:
+1. Choosing which agent(s) to configure (**All**, **Claude Code + Codex**, **Claude Code only**, **Codex only**, **GitHub Copilot only**, or **Google Antigravity (AGY) only**)
+2. Selecting your storage backend:
+   - **Databricks** (OAuth / CLI profile from `~/.databrickscfg` — no PAT required)
+   - **Self-hosted MLflow Server** (`http://` or `https://` URL, with optional bearer token)
+   - **Local MLflow Server** (`http://localhost:5000`)
+3. Resolving or creating your MLflow experiment and writing the standard configuration files
+4. Updating `.gitignore`
 
-Restart Claude Code after setup. Traces are automatically sent to Databricks when sessions end.
+### Non-Interactive / Flag-Driven Setup
+
+```bash
+# Configure all 4 agents (Claude Code, Codex, Copilot, Antigravity) in one shot
+traces init --agent all --tracking-uri http://localhost:5000 --experiment my-project --yes
+
+# Databricks (using a CLI/OAuth profile from ~/.databrickscfg)
+traces init --agent all --profile my-workspace --experiment /Workspace/Shared/my-project --yes
+
+# Databricks headless / service-principal mode (uses DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET at runtime)
+traces init --agent all --spn --experiment /Workspace/Shared/my-project --yes
+
+# Self-hosted MLflow server (with optional bearer token saved to gitignored local config files)
+traces init --agent all --tracking-uri https://mlflow.example.com --experiment my-project --token $MLFLOW_TRACKING_TOKEN --yes
+
+# Configure a specific agent
+traces init --agent claude --tracking-uri https://mlflow.example.com --experiment my-project --yes
+traces init --agent codex --tracking-uri https://mlflow.example.com --experiment my-project --yes
+traces init --agent copilot --tracking-uri https://mlflow.example.com --experiment my-project --yes
+traces init --agent agy --tracking-uri https://mlflow.example.com --experiment my-project --yes
+```
 
 ## CLI Commands
 
 ```bash
-traces init                      # Interactive setup
+traces init                      # Interactive or flag-based setup for Claude, Codex, Copilot & AGY
+traces codex init                # Shortcut to configure Codex CLI only
+traces copilot init              # Shortcut to configure GitHub Copilot only
+traces agy init                  # Shortcut to configure Google Antigravity (AGY) only
+traces status                    # Show current tracing status across all 4 agents
+traces disable                   # Disable tracing in the current project across all 4 agents
 traces list                      # List available experiments
-traces search                    # Search recent traces
+traces search                    # Search recent traces in the project's experiment
 traces search -e <experiment>    # Filter by experiment name
-traces search --hours 24         # Last 24 hours
-traces search --trace-id <id>    # Get specific trace
+traces search --hours 24         # Search last 24 hours
+traces search --trace-id <id>    # Get specific trace by ID
 traces search -f json            # Output as JSON
 traces search -f context         # LLM-optimized format
+traces search -f tools           # Summarize tool usage across traces
 ```
 
-## Codex support
+## How Each Agent Is Configured
 
-Configure a project using a Databricks profile (OAuth/CLI authentication; no PAT required):
+### 1. Claude Code (`@mlflow/claude-code`)
+- Installs the official `mlflow-tracing@mlflow-plugins` Claude Code plugin (`mlflow.claude_code.plugin`) and enables `"enabledPlugins": {"mlflow-tracing@mlflow-plugins": true}` in `.claude/settings.json`.
+- Writes `.claude/settings.json` using Claude Code's native `"env"` block (`MLFLOW_CLAUDE_TRACING_ENABLED`, `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT_ID`, `MLFLOW_EXPERIMENT_NAME`).
+- Stores machine-specific overrides (`MLFLOW_TRACKING_URI=databricks://<profile>`, `DATABRICKS_CONFIG_PROFILE`, or `MLFLOW_TRACKING_TOKEN`) in the gitignored `.claude/settings.local.json`.
+
+### 2. OpenAI Codex CLI (`@mlflow/codex`)
+- Registers `notify = ["mlflow-codex", "notify-hook"]` in `./.codex/config.toml` and syncs `$CODEX_HOME/config.toml` (including chaining into Codex Desktop's `SkyComputerUseClient turn-ended --previous-notify` wrapper when present) while preserving existing TOML comments and sections.
+- Writes `trackingUri` and resolved `experimentId` to `./.codex/mlflow-tracing.json`.
+- Requires the official `@mlflow/codex` package (`npm install -g @mlflow/codex`).
+
+### 3. GitHub Copilot (`copilot` CLI / VS Code Copilot)
+- Writes `.github/hooks/mlflow-tracing.json` (`SessionStart` and `Stop` hooks invoking `traces copilot-hook session-start` and `traces copilot-hook stop`) and gitignored `.github/hooks/mlflow-tracing.local.json`.
+- Converts Copilot JSONL transcripts (`user.message`, `assistant.message` with `toolRequests` and `reasoningText`, `tool.execution_complete`) into Claude Code JSONL format and delegates trace creation to `mlflow.claude_code.tracing.process_transcript()`.
+
+### 4. Google Antigravity (`agy` CLI / IDE)
+- Writes `.agents/hooks.json` with a top-level `"mlflow-tracing"` named `Stop` hook (preserving any other named hooks in `.agents/hooks.json`) and gitignored `.agents/mlflow-tracing.json`.
+- Converts Antigravity `transcript.jsonl` / `transcript_full.jsonl` trajectories (`USER_INPUT`, `PLANNER_RESPONSE` with `thinking`, `tool_calls`, and token `usage`, plus `GENERIC` tool outputs) into Claude Code JSONL format and delegates trace creation to `mlflow.claude_code.tracing.process_transcript()`.
+
+## Built-in Telemetry Captured in MLflow
+- User prompts, assistant responses, and reasoning / thinking blocks
+- Tool calls and outputs (`Read`, `Write`, `Edit`, `Bash`, `exec_command`, `run_in_terminal`, `run_command`, etc.)
+- Subagent invocations as nested spans
+- Per-call and per-session token usage (input, output, cache read/creation) and estimated cost
+- Git provenance (`mlflow.source.git.commit`, `mlflow.source.git.branch`, `mlflow.source.git.repoURL`)
+- Session metadata (user, working directory, model, permission mode, agent version)
+
+## Releasing
+
+Cutting a release is the merge that bumps the version, nothing else. In the pull request that changes the package:
 
 ```bash
-traces codex init --profile my-workspace --experiment /Workspace/Shared/my-project
+uv version --bump patch   # or minor / major
 ```
 
-Or use a tracking server or local storage:
-
-```bash
-traces codex init --tracking-uri http://localhost:5000 --experiment my-project
-traces codex init --experiment my-project  # SQLite and artifacts under CODEX_HOME
-```
-
-For a headless Databricks environment, use `--tracking-uri databricks` and supply
-`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and `DATABRICKS_CLIENT_SECRET` through the
-environment. `--profile` and `--tracking-uri` are mutually exclusive. `--yes` skips
-the installation confirmation.
-
-Restart Codex after setup. This integration is Python-native; it does not require
-Node.js or `@mlflow/codex`.
-
-### What setup changes
-
-Codex CLI 0.153.4 ignores project-level `notify` entries, so setup installs the hook
-in `$CODEX_HOME/config.toml` (`~/.codex/config.toml` by default). It preserves TOML
-comments, unrelated settings, and the existing notification command. The original
-config is backed up once as `config.before-claudetracing.toml`.
-
-Project paths and tracing destinations are registered in
-`$CODEX_HOME/claudetracing.json`, outside the project repository. Only registered
-directories and their descendants are traced; the most specific registration wins.
-Other projects still receive the original notification. Setup can be repeated for
-multiple projects without chaining duplicate hooks. The hook uses the Python
-interpreter that ran setup, so keep that environment installed.
-
-### Conversation capture and replay
-
-- Each completed turn becomes an AGENT trace grouped by Codex thread ID. Prompts
-  and assistant messages are retained on the root span; TOOL spans include both
-  `function_call` and `custom_tool_call` inputs/results and recorded timestamps.
-- Token counts are deltas of Codex's cumulative usage, rather than repeated sums
-  of the session total. The serving model is recorded as a trace tag.
-- Each notification scans the persisted rollout for missed completed turns.
-  Local checkpoints skip turns already exported successfully; per-session locks
-  serialize overlapping notifications.
-- By default, the entire available rollout is also saved as
-  `conversation/rollout.jsonl` in an MLflow run tagged `codex.session_id`. A
-  `codex.rollout_sha256` tag verifies the snapshot. This retains unsupported record
-  types, instructions, and partial turns that the readable trace view omits.
-  Choose `--no-archive` during setup to disable this additional raw upload.
-
-Exports run in a detached worker so a short-lived Codex CLI process can exit
-without cutting off the upload. Failures are recorded in
-`$CODEX_HOME/claudetracing/errors.log`; worker/notifier output is in `notify.log`.
-After resolving a connectivity or authentication problem, replay from the
-configured project directory:
-
-```bash
-traces codex replay <thread-uuid>
-```
-
-`MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT_NAME`, and `MLFLOW_EXPERIMENT_ID` in the
-Codex launch environment override the registered destination. Credentials stay in
-Databricks profiles or environment variables, not in generated tracing settings.
-
-Capture requires a local rollout under `$CODEX_HOME/sessions`. Ephemeral sessions
-and remote subagent transcripts are not recoverable through this hook. Interrupted
-turns remain in the raw archive but are not presented as completed turn traces.
-The raw archive contains everything Codex persisted, which can include sensitive
-prompt and tool content; it is not a reconstruction of unrecorded model context.
-An exporter crash between successful remote persistence and writing the local
-checkpoint can result in a duplicate turn on replay. Deleting checkpoints also
-allows re-export; they are not a server-side exactly-once guarantee.
-
-The existing `traces enrichment` commands configure Claude hooks. Codex currently
-records model and token metadata directly and does not apply Claude-specific
-enrichment settings.
-
-See [Codex configuration](https://developers.openai.com/codex/config-reference/)
-and [MLflow's Codex integration](https://mlflow.org/docs/latest/genai/tracing/integrations/listing/codex/)
-for the underlying notify/rollout model.
-
-## Enrichments
-
-Enrichments add extra metadata to your traces. They are optional and can be enabled per-project. Multiple enrichments can be active simultaneously.
-
-### Available Enrichments
-
-| Name | Description |
-|------|-------------|
-| `git` | Adds git repository context: commit ID, branch, remote URL, repo name |
-| `files` | Adds list of files modified (written/edited) during the session |
-| `tokens` | Adds token usage statistics including cache metrics |
-| `model` | Adds the Claude model(s) that served the session |
-
-### Managing Enrichments
-
-```bash
-traces enrichment list              # List available enrichments
-traces enrichment info git          # Show details about an enrichment
-traces enrichment add git files     # Enable multiple enrichments
-traces enrichment remove tokens     # Disable an enrichment
-```
-
-After adding or removing enrichments, restart Claude Code to apply the changes.
-
-### Git Enrichment
-
-Correlate traces with specific commits and branches:
-
-- `git.commit_id` - Full commit SHA
-- `git.branch` - Current branch name
-- `git.remote_url` - Origin remote URL
-- `git.repo_name` - Repository name (e.g., `org/repo`)
-
-### Files Enrichment
-
-Track which files were modified during the session:
-
-- `files.modified` - JSON array of file paths that were written or edited
-
-### Tokens Enrichment
-
-Monitor token consumption and cache efficiency:
-
-- `tokens.input` - Total input tokens
-- `tokens.output` - Total output tokens
-- `tokens.cache_read` - Tokens read from prompt cache
-- `tokens.cache_creation` - Tokens written to prompt cache
-- `tokens.total` - Total tokens (input + output)
-
-### Model Enrichment
-
-See which Claude model(s) served the session:
-
-- `model` - Comma-separated distinct models seen in the transcript
-- `model.primary` - Model with the most assistant messages
-
----
-
-MLflow tracing for Claude Code sessions with Databricks integration. Automatically captures conversations, tool usage, and session metadata.
-
-## Why Trace Claude Code Sessions?
-
-When Claude Code becomes part of your development workflow, visibility into how it's being used becomes valuable:
-
-- **Review past sessions** - What did Claude do while you were away? Search and replay any session to understand decisions made.
-- **Team insights** - See how your team uses Claude Code across projects. Identify patterns, common tasks, and areas for improvement.
-- **Debug failures** - When something goes wrong, trace data shows exactly which tools were called, in what order, and what inputs/outputs were involved.
-- **Cost awareness** - Track token usage and session duration to understand resource consumption.
-- **Compliance & audit** - Maintain records of AI-assisted code changes for regulated environments.
-
-## Prerequisites
-
-- Python 3.10+
-- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) installed
-- Access to a Databricks workspace
-
-## What Gets Traced
-
-- User prompts and Claude responses
-- Tool usage (Read, Write, Edit, Bash, etc.)
-- Execution timing per operation
-- Session metadata (user, working directory, git branch)
-
-## How It Works
-
-1. The `traces init` command creates a `.claude/settings.json` file
-2. This configures a Stop hook that runs when Claude Code sessions end
-3. The hook calls MLflow's built-in Claude Code tracing to capture the session
-4. Traces are uploaded to your Databricks MLflow experiment
-
-## FAQ
-
-### Why might my traces have different metadata than my teammate's?
-
-Enrichment configuration is stored locally per-user in `.claude/settings.json`. If teammates configure different enrichments, their traces will have different tags. See [ADR-001](docs/adr/001-enrichment-consistency.md) for the design rationale.
-
-### What happens when I join an existing experiment?
-
-During `traces init`, we check existing traces for enrichment patterns. If enrichments are detected, you'll see:
-
-```
-Enrichment mismatch detected
-Existing traces use: files, git, tokens
-
-Options:
-  [1] Match existing enrichments (recommended)
-  [2] Continue without enrichments
-  [3] Cancel setup
-```
-
-Choosing option 1 automatically enables the matching enrichments.
-
-### Why warn instead of auto-configuring enrichments?
-
-We chose advisory warnings over enforcement because:
-- Teams may intentionally use different enrichments for different use cases
-- Some users may not have all enrichments available (e.g., no git repo)
-- Respecting user autonomy while surfacing potential issues
+Then add a `## v<version>` section to `CHANGELOG.md` describing the change. CI refuses a pull request that touches `src/` or `pyproject.toml` without a bump, a bump that is not above the latest tag, or a bump without its changelog section (`tools/check_version_bump.py`). When the pull request lands on `master`, CI builds the package, publishes it to PyPI through trusted publishing, tags the commit, and creates the GitHub release with the changelog section as its body. No tag is pushed by hand.
 
 ## License
 
 MIT
-
----
-
-Built with [Claude Opus 4.5](https://www.anthropic.com/claude)

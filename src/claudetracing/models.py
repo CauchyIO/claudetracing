@@ -1,4 +1,4 @@
-"""Pydantic models for MLFlow trace data."""
+"""Pydantic models for MLflow trace data."""
 
 from datetime import datetime
 from typing import Any
@@ -11,12 +11,13 @@ class SpanInfo(BaseModel):
 
     span_id: str
     name: str
+    span_type: str | None = None
     parent_id: str | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
     status: str | None = None
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    outputs: dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, Any] | str | None = Field(default_factory=dict)
+    outputs: dict[str, Any] | str | None = Field(default_factory=dict)
     attributes: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -70,7 +71,10 @@ class TraceData(BaseModel):
         return [
             span.name
             for span in self.spans
-            if "tool" in span.name.lower() or span.attributes.get("span_type") == "tool"
+            if (span.span_type or "").upper() == "TOOL"
+            or "tool" in span.name.lower()
+            or str(span.attributes.get("span_type", "")).lower() == "tool"
+            or str(span.attributes.get("mlflow.spanType", "")).upper() == "TOOL"
         ]
 
     def to_summary(self) -> TraceSummary:
