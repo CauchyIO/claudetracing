@@ -66,8 +66,8 @@ traces init --agent agy --tracking-uri https://mlflow.example.com --experiment m
 # Pass an existing experiment ID instead of a name (skips create-or-resolve)
 traces init --agent all --tracking-uri http://localhost:5000 --experiment-id 42 --yes
 
-# Override the trace storage location (MLflow artifact root)
-traces init --agent all --tracking-uri http://localhost:5000 --experiment my-project --trace-location s3://bucket/traces --yes
+# Optional Unity Catalog trace destination (catalog.schema.table_prefix)
+traces init --agent all --profile my-workspace --experiment /Workspace/Shared/my-project --trace-location main.genai.traces --yes
 ```
 
 ## CLI Commands

@@ -146,12 +146,19 @@ def _single_agent_init(
     if profile and tracking_uri:
         raise typer.BadParameter("Use --profile or --tracking-uri, not both")
 
-    uri = None if profile else (tracking_uri or LOCAL_DEFAULT_URI)
-    exp = experiment or Path.cwd().resolve().name
+    is_dbx = bool(spn or profile or (tracking_uri or "").startswith("databricks"))
+    uri = (
+        "databricks"
+        if spn
+        else (None if profile else (tracking_uri or LOCAL_DEFAULT_URI))
+    )
+    project_name = Path.cwd().resolve().name
+    default_exp = f"/Workspace/Shared/{project_name}" if is_dbx else project_name
+    display_exp = experiment or default_exp
     if not yes:
         target_uri = f"databricks://{profile}" if profile else uri
         typer.echo(
-            f"Project: {Path.cwd().resolve()}\nExperiment: {exp}\nTracking URI: {target_uri}"
+            f"Project: {Path.cwd().resolve()}\nExperiment: {display_exp}\nTracking URI: {target_uri}"
         )
         typer.confirm(f"Configure {label} tracing in {target_dir_desc}?", abort=True)
 
@@ -161,7 +168,7 @@ def _single_agent_init(
             agent=cast(AgentChoice, target_agent),
             tracking_uri=uri,
             profile=profile,
-            experiment=exp,
+            experiment=experiment or default_exp,
             experiment_id=experiment_id,
             tracking_token=token,
             trace_location=trace_location,
