@@ -1,16 +1,15 @@
 # Changelog
 
-What each `claudetracing` release changed, newest first. Every pull request that bumps `version` in `pyproject.toml` (`uv version --bump patch|minor|major`) adds a `## v<version>` section here; when merged to `master`, CI publishes to PyPI and creates the GitHub Release using that section as the release notes.
+What each claudetracing release changed, newest first. The pull request that bumps the version in `pyproject.toml` (`uv version --bump patch|minor|major`) adds its section here. When the bump lands on `master`, CI publishes the package to PyPI and creates the GitHub release with that section as its body.
 
 ## v0.6.0
 
-- **Unified 4-agent setup (`traces init`)**: Configure **Claude Code**, **OpenAI Codex**, **GitHub Copilot** (CLI & VS Code), and **Google Antigravity (`agy`)** in a single command against the same MLflow experiment (`--agent [all|both|claude|codex|copilot|agy]`).
-- **Any MLflow backend**: Support local (`http://localhost:5000`) and self-hosted (`http://` / `https://` + `--token`) MLflow servers alongside Databricks OAuth profiles (`--profile`) and headless service principals (`--spn`).
-- **Aligned with MLflow 3.14+ native integrations**:
-  - **Claude Code**: Uses the official `mlflow-tracing@mlflow-plugins` plugin and Claude Code's native `"env"` block in `.claude/settings.json` (storing personal profile/token overrides in gitignored `.claude/settings.local.json`). Retires the legacy Python Stop hook and custom enrichment wrappers now built into MLflow.
-  - **OpenAI Codex**: Uses the official `@mlflow/codex` (`mlflow-codex notify-hook`) integration via `.codex/config.toml` and `.codex/mlflow-tracing.json` (replacing `traces codex replay` from `v0.5.0`), while staying compatible with Codex Desktop.
-  - **GitHub Copilot & Google Antigravity (`agy`)**: Adds `traces copilot-hook` (`.github/hooks/mlflow-tracing.json`) and `traces agy-hook` (`.agents/hooks.json`) to stream turns, thinking blocks, tool calls, and token usage into MLflow.
-- **Release on merge**: Merging a version bump to `master` automatically publishes to PyPI, tags `v<version>`, and creates the GitHub Release from `CHANGELOG.md`.
+- Support Claude Code, Codex, GitHub Copilot (`copilot`), and Antigravity (`agy`) via `traces init --agent [all|both|claude|codex|copilot|agy]`.
+- Support local (`http://localhost:5000`) and self-hosted (`--tracking-uri` + `--token`) MLflow servers in addition to Databricks profiles (`--profile`) and service principals (`--spn`).
+- Switch Claude Code setup to MLflow 3.14's `mlflow-tracing@mlflow-plugins` plugin and native `"env"` block in `.claude/settings.json`, removing the old Python Stop hook and custom git/token/model enrichment wrappers.
+- Switch Codex setup to `@mlflow/codex` (`mlflow-codex notify-hook`) via `.codex/config.toml` and `.codex/mlflow-tracing.json`, replacing `traces codex replay` from v0.5.0.
+- Add `traces copilot-hook` and `traces agy-hook` to convert Copilot and Antigravity session transcripts into MLflow traces.
+- Release on merge: pushing a new version in `pyproject.toml` to `master` publishes to PyPI, tags `v<version>`, and creates the GitHub release from `CHANGELOG.md`.
 
 ## v0.5.0
 
