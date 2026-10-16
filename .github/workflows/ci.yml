@@ -1,9 +1,22 @@
 name: CI
 
+# Cutting a release is the merge that bumps the version — nothing else.
+#
+# The previous workflow published to PyPI from a manually pushed v* tag and
+# created no GitHub release: 0.3.0 and 0.4.0 got tags and PyPI uploads but no
+# release entries, and 0.5.0 sat merged on master for a month with no tag at
+# all. Now a push to master whose pyproject version has no GitHub release yet
+# is built, published to PyPI, tagged, and released with that version's
+# CHANGELOG.md section as the body. Every other push to master is a no-op
+# here. Pull requests that change the package must carry the bump and the
+# changelog section (tools/check_version_bump.py), so the merge can release.
+#
+# PyPI trusted publishing is bound to this workflow file name (ci.yml); the
+# publish step must stay in this file.
+
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   pull_request:
     branches: [master]
 
@@ -26,10 +39,10 @@ jobs:
         run: uv sync --dev
 
       - name: Lint with ruff
-        run: uv run ruff check src/ tests/
+        run: uv run ruff check src/ tests/ tools/
 
       - name: Format check with ruff
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/ tools/
 
       - name: Type check with ty
         run: uv run ty check src/
@@ -44,15 +57,35 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
-  release:
-    needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+  version-bump:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the check compares against the base branch and the tags
+
+      - name: Package changes carry a version bump and a CHANGELOG section
+        run: python3 tools/check_version_bump.py --base "origin/${{ github.base_ref }}"
+
+  release:
+    needs: test
+    # CauchyIO/claudetracing only: a fork carries the same workflow and must
+    # never tag, release, or publish.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'CauchyIO/claudetracing'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-master
+      cancel-in-progress: false
+    permissions:
+      contents: write  # the tag and the GitHub release
+      id-token: write  # PyPI trusted publishing
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the gate needs the tags
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -62,8 +95,62 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # A draft counts as released here: it is a human's to publish or delete,
+      # not this workflow's to clobber. A tag without a release is an error,
+      # not a case to paper over: it means someone released by hand, and the
+      # release entry has to be created at that tag before this job can judge
+      # the next version.
+      - name: Is the canonical version released already?
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="v$(uv version --short)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "$version already has a release — nothing to do."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::$version is tagged but has no GitHub release. Create it at the existing tag (gh release create $version --verify-tag --notes-file <notes>) and re-run."
+            exit 1
+          else
+            echo "$version has no release yet — cutting it from $GITHUB_SHA."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The body was reviewed in the bump PR; nothing is generated here. A
+      # missing or empty section stops the release: the PR check guards the
+      # same thing, so this only fires when someone bypassed it.
+      - name: Extract the release body from CHANGELOG.md
+        if: steps.gate.outputs.released == 'false'
+        run: >
+          python3 tools/release_notes.py
+          --version "${{ steps.gate.outputs.version }}"
+          --extract-from CHANGELOG.md --out RELEASE_NOTES.md
+
       - name: Build package
+        if: steps.gate.outputs.released == 'false'
         run: uv build
 
+      # Publish before tagging, so a failure here leaves no release behind and
+      # the next push to master simply cuts it again. skip-existing makes that
+      # re-run idempotent: files already on PyPI from a run that failed later
+      # are skipped (and logged as such), and the run reaches the release step.
       - name: Publish to PyPI
+        if: steps.gate.outputs.released == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      # --target makes gh create the tag at this commit, so the tag is a
+      # product of the release rather than a step someone has to remember.
+      - name: Create the tag and publish the release
+        if: steps.gate.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.gate.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.gate.outputs.version }}" \
+            --notes-file RELEASE_NOTES.md

@@ -20,8 +20,11 @@ wheels/
 mlruns/
 mlflow.db
 
-# Claude Code
+# Claude Code, Codex, Copilot & Antigravity (AGY)
 .claude/
+.codex/mlflow-tracing.json
+.github/hooks/mlflow-tracing.local.json
+.agents/mlflow-tracing.json
 scratch/
 
 # Caches
@@ -29,8 +32,3 @@ scratch/
 .ruff_cache/
 .mypy_cache/
 .coverage
-
-
-# Claude Code Tracing
-.claude/settings.local.json
-.claude/mlflow/

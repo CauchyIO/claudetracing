@@ -1,115 +1,433 @@
-"""CLI entry point for trace retrieval."""
+"""CLI entry point for Claude Code, Codex, Copilot, and Antigravity (agy) MLflow tracing."""
 
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import cast
 
 import typer
 
-app = typer.Typer(help="Claude Code and Codex MLflow tracing CLI")
-codex_app = typer.Typer(help="Configure and replay Codex conversation tracing")
+from claudetracing import __version__
+
+app = typer.Typer(
+    help="Standardized MLflow tracing setup and CLI for Claude Code, Codex, GitHub Copilot, and Antigravity (agy)"
+)
+codex_app = typer.Typer(help="Configure Codex CLI tracing (@mlflow/codex conventions)")
 app.add_typer(codex_app, name="codex")
-enrichment_app = typer.Typer(help="Manage trace enrichments")
-app.add_typer(enrichment_app, name="enrichment")
+copilot_app = typer.Typer(help="Configure GitHub Copilot (CLI / VS Code) tracing")
+app.add_typer(copilot_app, name="copilot")
+agy_app = typer.Typer(help="Configure Google Antigravity (agy) tracing")
+app.add_typer(agy_app, name="agy")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"claudetracing {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main_callback(
+    version: bool | None = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the claudetracing version and exit.",
+    ),
+) -> None:
+    """Standardized MLflow tracing setup and CLI for coding agents."""
+
+
+@app.command("version")
+def version_cmd() -> None:
+    """Show the claudetracing version."""
+    typer.echo(f"claudetracing {__version__}")
 
 
 @app.command()
 def init(
+    agent: str | None = typer.Option(
+        None,
+        "--agent",
+        "-a",
+        help="Agent(s) to configure: 'all', 'both', 'claude', 'codex', 'copilot', or 'agy' (prompted if omitted).",
+    ),
+    tracking_uri: str | None = typer.Option(
+        None,
+        "--tracking-uri",
+        "-u",
+        help="MLflow tracking URI (e.g., 'databricks', 'http://localhost:5000', 'https://mlflow.example.com').",
+    ),
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        "-p",
+        help="Databricks CLI/OAuth profile from ~/.databrickscfg.",
+    ),
     spn: bool = typer.Option(
         False,
         "--spn",
-        help="Configure headless service-principal auth (no local profile; "
-        "credentials come from DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET in the environment).",
+        help="Configure headless service-principal auth (credentials come from DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET).",
+    ),
+    experiment: str | None = typer.Option(
+        None,
+        "--experiment",
+        "-e",
+        help="MLflow experiment name or Databricks workspace path.",
+    ),
+    experiment_id: str | None = typer.Option(
+        None,
+        "--experiment-id",
+        help="Explicit MLflow experiment ID.",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="Bearer token (MLFLOW_TRACKING_TOKEN) for a self-hosted MLflow server.",
+    ),
+    trace_location: str | None = typer.Option(
+        None,
+        "--trace-location",
+        help="Optional Unity Catalog trace location in 'catalog.schema.table_prefix' format.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip interactive prompts and use supplied flags or defaults.",
     ),
 ):
-    """Initialize Claude Code tracing in the current project."""
-    from claudetracing.setup import run_setup
+    """Initialize MLflow tracing for coding agents in the current project."""
+    from claudetracing.setup import VALID_AGENTS, AgentChoice, run_setup
 
-    raise SystemExit(run_setup(spn=spn))
+    normalized_agent = agent
+    if normalized_agent == "ghcp":
+        normalized_agent = "copilot"
+    elif normalized_agent == "antigravity":
+        normalized_agent = "agy"
+
+    if normalized_agent is not None and normalized_agent not in VALID_AGENTS:
+        raise typer.BadParameter(
+            f"Invalid --agent value. Choose from: {', '.join(VALID_AGENTS)}"
+        )
+
+    raise SystemExit(
+        run_setup(
+            spn=spn,
+            agent=cast(AgentChoice | None, normalized_agent),
+            tracking_uri=tracking_uri,
+            profile=profile,
+            experiment=experiment,
+            experiment_id=experiment_id,
+            tracking_token=token,
+            trace_location=trace_location,
+            yes=yes,
+        )
+    )
+
+
+def _single_agent_init(
+    target_agent: str,
+    label: str,
+    target_dir_desc: str,
+    experiment: str | None,
+    experiment_id: str | None,
+    tracking_uri: str | None,
+    profile: str | None,
+    trace_location: str | None,
+    yes: bool,
+    *,
+    token: str | None = None,
+    spn: bool = False,
+) -> None:
+    from claudetracing.setup import LOCAL_DEFAULT_URI, AgentChoice, run_setup
+
+    if profile and tracking_uri:
+        raise typer.BadParameter("Use --profile or --tracking-uri, not both")
+
+    is_dbx = bool(spn or profile or (tracking_uri or "").startswith("databricks"))
+    uri = (
+        "databricks"
+        if spn
+        else (None if profile else (tracking_uri or LOCAL_DEFAULT_URI))
+    )
+    project_name = Path.cwd().resolve().name
+    default_exp = f"/Workspace/Shared/{project_name}" if is_dbx else project_name
+    display_exp = experiment or default_exp
+    if not yes:
+        target_uri = f"databricks://{profile}" if profile else uri
+        typer.echo(
+            f"Project: {Path.cwd().resolve()}\nExperiment: {display_exp}\nTracking URI: {target_uri}"
+        )
+        typer.confirm(f"Configure {label} tracing in {target_dir_desc}?", abort=True)
+
+    raise SystemExit(
+        run_setup(
+            spn=spn,
+            agent=cast(AgentChoice, target_agent),
+            tracking_uri=uri,
+            profile=profile,
+            experiment=experiment or default_exp,
+            experiment_id=experiment_id,
+            tracking_token=token,
+            trace_location=trace_location,
+            yes=yes,
+        )
+    )
 
 
 @codex_app.command("init")
 def codex_init(
-    experiment: str = typer.Option(
-        ..., "--experiment", "-e", help="MLflow experiment name/path"
+    experiment: str | None = typer.Option(
+        None, "--experiment", "-e", help="MLflow experiment name/path"
     ),
-    tracking_uri: str = typer.Option(
-        "", "--tracking-uri", help="MLflow URI; defaults to local SQLite"
+    experiment_id: str | None = typer.Option(
+        None, "--experiment-id", help="Explicit MLflow experiment ID"
     ),
-    profile: Optional[str] = typer.Option(
-        None, "--profile", help="Databricks OAuth/CLI profile"
+    tracking_uri: str | None = typer.Option(
+        None,
+        "--tracking-uri",
+        "-u",
+        help="MLflow tracking URI (defaults to http://localhost:5000)",
     ),
-    archive: bool = typer.Option(
-        True,
-        "--archive/--no-archive",
-        help="Retain the full raw rollout as an MLflow artifact",
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Databricks OAuth/CLI profile"
+    ),
+    trace_location: str | None = typer.Option(
+        None,
+        "--trace-location",
+        help="Unity Catalog trace location (catalog.schema.table_prefix)",
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
     ),
     yes: bool = typer.Option(
-        False, "--yes", "-y", help="Confirm user-level notifier installation"
+        False, "--yes", "-y", help="Skip interactive confirmation"
     ),
 ):
-    """Register this project and install a user-level Codex notify hook."""
-    from pathlib import Path
-    from claudetracing.codex import codex_home, configure
+    """Configure Codex CLI tracing (.codex/config.toml and .codex/mlflow-tracing.json)."""
+    _single_agent_init(
+        "codex",
+        "Codex",
+        "./.codex/",
+        experiment,
+        experiment_id,
+        tracking_uri,
+        profile,
+        trace_location,
+        yes,
+        token=token,
+        spn=spn,
+    )
 
-    if profile and tracking_uri:
-        raise typer.BadParameter("Use --profile or --tracking-uri, not both")
+
+@copilot_app.command("init")
+def copilot_init(
+    experiment: str | None = typer.Option(
+        None, "--experiment", "-e", help="MLflow experiment name/path"
+    ),
+    experiment_id: str | None = typer.Option(
+        None, "--experiment-id", help="Explicit MLflow experiment ID"
+    ),
+    tracking_uri: str | None = typer.Option(
+        None,
+        "--tracking-uri",
+        "-u",
+        help="MLflow tracking URI (defaults to http://localhost:5000)",
+    ),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Databricks OAuth/CLI profile"
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip interactive confirmation"
+    ),
+):
+    """Configure GitHub Copilot tracing (.github/hooks/mlflow-tracing.json)."""
+    _single_agent_init(
+        "copilot",
+        "GitHub Copilot",
+        "./.github/hooks/",
+        experiment,
+        experiment_id,
+        tracking_uri,
+        profile,
+        None,
+        yes,
+        token=token,
+        spn=spn,
+    )
+
+
+@agy_app.command("init")
+def agy_init(
+    experiment: str | None = typer.Option(
+        None, "--experiment", "-e", help="MLflow experiment name/path"
+    ),
+    experiment_id: str | None = typer.Option(
+        None, "--experiment-id", help="Explicit MLflow experiment ID"
+    ),
+    tracking_uri: str | None = typer.Option(
+        None,
+        "--tracking-uri",
+        "-u",
+        help="MLflow tracking URI (defaults to http://localhost:5000)",
+    ),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Databricks OAuth/CLI profile"
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (MLFLOW_TRACKING_TOKEN)"
+    ),
+    spn: bool = typer.Option(
+        False, "--spn", help="Configure headless service-principal auth"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip interactive confirmation"
+    ),
+):
+    """Configure Google Antigravity (agy) tracing (.agents/hooks.json and .agents/mlflow-tracing.json)."""
+    _single_agent_init(
+        "agy",
+        "Antigravity (agy)",
+        "./.agents/",
+        experiment,
+        experiment_id,
+        tracking_uri,
+        profile,
+        None,
+        yes,
+        token=token,
+        spn=spn,
+    )
+
+
+@app.command("copilot-hook", hidden=True)
+def copilot_hook_cmd(
+    event: str = typer.Argument("stop", help="Hook event: 'stop' or 'session-start'"),
+):
+    """Internal hook handler invoked by GitHub Copilot (.github/hooks/mlflow-tracing.json)."""
+    from claudetracing.copilot import run_copilot_session_start, run_copilot_stop
+
+    if event == "session-start":
+        run_copilot_session_start()
+    else:
+        run_copilot_stop()
+
+
+@app.command("agy-hook", hidden=True)
+def agy_hook_cmd():
+    """Internal hook handler invoked by Google Antigravity (.agents/hooks.json)."""
+    from claudetracing.agy import run_agy_stop
+
+    run_agy_stop()
+
+
+@app.command()
+def status():
+    """Show current MLflow tracing status for Claude Code, Codex, Copilot, and Antigravity (agy)."""
+    from claudetracing.setup import get_all_agent_statuses
+
     root = Path.cwd().resolve()
-    uri = f"databricks://{profile}" if profile else tracking_uri
-    if not uri:
-        uri = f"sqlite:///{codex_home() / 'claudetracing' / 'mlflow.db'}"
-    typer.echo(f"Project: {root}\nExperiment: {experiment}\nTracking URI: {uri}")
-    typer.echo(
-        f"Updates {codex_home() / 'config.toml'}; preserves the existing notifier."
-    )
-    if archive:
-        typer.echo(
-            "Uploads the full persisted rollout, including prompts and tool outputs."
-        )
-    if not yes:
-        typer.confirm("Install Codex tracing?", abort=True)
-    configure(root, uri, experiment, archive=archive)
-    typer.echo(
-        "Configured. Restart Codex. Logs and retry state: "
-        + str(codex_home() / "claudetracing")
-    )
+    claude_st, codex_st, copilot_st, agy_st = get_all_agent_statuses(root)
+
+    typer.echo(f"Project: {root}\n")
+
+    if claude_st["enabled"]:
+        typer.echo("Claude Code: enabled")
+        typer.echo(f"  Tracking URI: {claude_st['tracking_uri']}")
+        if claude_st["profile"]:
+            typer.echo(f"  Databricks profile: {claude_st['profile']} (via .local)")
+        if claude_st["experiment_name"]:
+            typer.echo(f"  Experiment name: {claude_st['experiment_name']}")
+        if claude_st["experiment_id"]:
+            typer.echo(f"  Experiment ID: {claude_st['experiment_id']}")
+        if claude_st["trace_location"]:
+            typer.echo(f"  Trace location: {claude_st['trace_location']}")
+    else:
+        typer.echo("Claude Code: not configured")
+
+    typer.echo("")
+    if codex_st.enabled:
+        typer.echo(f"Codex: enabled ({codex_st.scope} scope)")
+        typer.echo(f"  Tracking URI: {codex_st.tracking_uri}")
+        typer.echo(f"  Experiment ID: {codex_st.experiment_id}")
+        if codex_st.trace_location:
+            typer.echo(f"  Trace location: {codex_st.trace_location}")
+        if not codex_st.binary_installed:
+            typer.echo(
+                "  Warning: `mlflow-codex` not found on PATH (run `npm install -g @mlflow/codex`)"
+            )
+    else:
+        typer.echo("Codex: not configured")
+
+    typer.echo("")
+    if copilot_st.enabled:
+        typer.echo("GitHub Copilot: enabled")
+        typer.echo(f"  Tracking URI: {copilot_st.tracking_uri}")
+        if copilot_st.experiment_name:
+            typer.echo(f"  Experiment name: {copilot_st.experiment_name}")
+        if copilot_st.experiment_id:
+            typer.echo(f"  Experiment ID: {copilot_st.experiment_id}")
+    else:
+        typer.echo("GitHub Copilot: not configured")
+
+    typer.echo("")
+    if agy_st.enabled:
+        typer.echo("Antigravity (agy): enabled")
+        typer.echo(f"  Tracking URI: {agy_st.tracking_uri}")
+        if agy_st.experiment_name:
+            typer.echo(f"  Experiment name: {agy_st.experiment_name}")
+        if agy_st.experiment_id:
+            typer.echo(f"  Experiment ID: {agy_st.experiment_id}")
+    else:
+        typer.echo("Antigravity (agy): not configured")
 
 
-@codex_app.command("replay")
-def codex_replay(session_id: str = typer.Argument(..., help="Codex thread UUID")):
-    """Export missed completed turns and refresh this session's raw archive."""
-    from pathlib import Path
-    from claudetracing.codex import Notification, export_session, target_for
+@app.command()
+def disable():
+    """Disable MLflow tracing for all coding agents in the current project."""
+    from claudetracing.setup import disable_all_project_tracing
 
-    if target_for(Path.cwd()) is None:
-        raise typer.BadParameter(
-            "This directory is not configured; run traces codex init first"
-        )
-    export_session(
-        Notification.model_validate(
-            {
-                "type": "agent-turn-complete",
-                "thread-id": session_id,
-                "cwd": str(Path.cwd()),
-            }
-        )
-    )
-    typer.echo("Codex session export complete.")
+    removed = disable_all_project_tracing(Path.cwd().resolve())
+    if not any(removed.values()):
+        typer.echo("No tracing configuration found in this project.")
+        return
+
+    if removed["claude"]:
+        typer.echo("Disabled Claude Code tracing.")
+    if removed["codex"]:
+        typer.echo("Disabled Codex tracing.")
+    if removed["copilot"]:
+        typer.echo("Disabled GitHub Copilot tracing.")
+    if removed["agy"]:
+        typer.echo("Disabled Antigravity (agy) tracing.")
 
 
 @app.command()
 def search(
-    experiment: Optional[str] = typer.Option(
+    experiment: str | None = typer.Option(
         None, "-e", "--experiment", help="Experiment name"
     ),
-    limit: int = typer.Option(10, "-l", "--limit", help="Max traces to return"),
-    hours: Optional[int] = typer.Option(None, help="Search last N hours"),
-    since: Optional[str] = typer.Option(
-        None, help="Search since datetime (ISO format)"
+    experiment_id: str | None = typer.Option(
+        None, "--experiment-id", help="Experiment ID"
     ),
+    limit: int = typer.Option(10, "-l", "--limit", help="Max traces to return"),
+    hours: int | None = typer.Option(None, help="Search last N hours"),
+    since: str | None = typer.Option(None, help="Search since datetime (ISO format)"),
     format: str = typer.Option(
         "summary", "-f", "--format", help="Output: summary|json|context|tools"
     ),
-    trace_id: Optional[str] = typer.Option(
+    trace_id: str | None = typer.Option(
         None, "--trace-id", help="Get specific trace by ID"
     ),
 ):
@@ -121,9 +439,20 @@ def search(
         format_traces_json,
         format_traces_summary,
     )
-    from claudetracing.setup import load_settings
+    from claudetracing.setup import load_tracing_env
 
-    load_settings()  # Load .claude/settings.json env vars
+    formatters = {
+        "summary": format_traces_summary,
+        "json": format_traces_json,
+        "context": format_for_context,
+        "tools": format_tool_usage,
+    }
+    if format not in formatters:
+        raise typer.BadParameter(
+            f"Invalid format '{format}'. Choose from: summary, json, context, tools."
+        )
+
+    load_tracing_env()
     client = TracingClient()
 
     if trace_id:
@@ -133,18 +462,27 @@ def search(
             raise typer.Exit(1)
         traces = [trace]
     elif hours or since:
-        since_dt = datetime.fromisoformat(since) if since else None
+        normalized_since = (
+            since[:-1] + "+00:00" if since and since.endswith("Z") else since
+        )
+        since_dt = (
+            datetime.fromisoformat(normalized_since) if normalized_since else None
+        )
         traces = client.search_traces_by_time(
-            experiment_name=experiment, hours=hours, since=since_dt, max_results=limit
+            experiment_name=experiment,
+            experiment_id=experiment_id,
+            hours=hours,
+            since=since_dt,
+            max_results=limit,
         )
     else:
-        traces = client.search_traces(experiment_name=experiment, max_results=limit)
+        traces = client.search_traces(
+            experiment_name=experiment,
+            experiment_id=experiment_id,
+            max_results=limit,
+        )
 
-    output = {
-        "json": format_traces_json,
-        "context": format_for_context,
-        "tools": format_tool_usage,
-    }.get(format, format_traces_summary)(traces)
+    output = formatters[format](traces)
 
     typer.echo(output)
 
@@ -153,9 +491,9 @@ def search(
 def list_experiments():
     """List available experiments."""
     from claudetracing.client import TracingClient
-    from claudetracing.setup import load_settings
+    from claudetracing.setup import load_tracing_env
 
-    load_settings()  # Load .claude/settings.json env vars
+    load_tracing_env()
     client = TracingClient()
     experiments = client.list_experiments()
 
@@ -166,100 +504,6 @@ def list_experiments():
     typer.echo("Available experiments:")
     for exp in experiments:
         typer.echo(f"  [{exp['id']}] {exp['name']}")
-
-
-@enrichment_app.command("list")
-def enrichment_list():
-    """List available trace enrichments."""
-    from claudetracing.enrichments import (
-        get_active_enrichments,
-        list_enrichments,
-        load_settings,
-    )
-
-    enrichments = list_enrichments()
-    settings = load_settings()
-    active = get_active_enrichments(settings)
-
-    typer.echo("Available enrichments:\n")
-    for e in enrichments:
-        status = "[active]" if e.name in active else ""
-        typer.echo(f"  {e.name} {status}")
-        typer.echo(f"    {e.description}\n")
-
-    if not settings:
-        typer.echo("Run 'traces init' first to enable enrichments.")
-
-
-@enrichment_app.command("info")
-def enrichment_info(
-    name: str = typer.Argument(..., help="Enrichment name to inspect"),
-):
-    """Show detailed information about an enrichment."""
-    from claudetracing.enrichments import (
-        get_active_enrichments,
-        get_enrichment,
-        load_settings,
-    )
-
-    enrichment = get_enrichment(name)
-    if not enrichment:
-        from claudetracing.enrichments import ENRICHMENTS
-
-        available = ", ".join(ENRICHMENTS.keys())
-        typer.echo(f"Unknown enrichment '{name}'. Available: {available}", err=True)
-        raise typer.Exit(1)
-
-    settings = load_settings()
-    active = get_active_enrichments(settings)
-    status = "active" if name in active else "inactive"
-
-    typer.echo(f"\n{enrichment.name} [{status}]")
-    typer.echo(f"  {enrichment.description}\n")
-    typer.echo("Tags added to traces:")
-    for tag in enrichment.tags:
-        typer.echo(f"  - {tag}")
-    typer.echo()
-
-
-@enrichment_app.command("add")
-def enrichment_add(
-    names: list[str] = typer.Argument(..., help="Enrichment name(s) to add"),
-):
-    """Add enrichments to the current project.
-
-    Examples:
-        traces enrichment add git
-        traces enrichment add git files tokens
-    """
-    from claudetracing.enrichments import add_enrichments
-
-    success, message = add_enrichments(names)
-    if success:
-        typer.echo(message)
-    else:
-        typer.echo(f"Error: {message}", err=True)
-        raise typer.Exit(1)
-
-
-@enrichment_app.command("remove")
-def enrichment_remove(
-    names: list[str] = typer.Argument(..., help="Enrichment name(s) to remove"),
-):
-    """Remove enrichments from the current project.
-
-    Examples:
-        traces enrichment remove git
-        traces enrichment remove git files
-    """
-    from claudetracing.enrichments import remove_enrichments
-
-    success, message = remove_enrichments(names)
-    if success:
-        typer.echo(message)
-    else:
-        typer.echo(f"Error: {message}", err=True)
-        raise typer.Exit(1)
 
 
 def main():
