@@ -8,7 +8,15 @@
 
 CLI to set up MLflow tracing for Claude Code, Codex, GitHub Copilot, and Antigravity (`agy`).
 
-It writes the config files each agent expects, resolves the experiment ID up front, and keeps personal Databricks profiles and tokens in gitignored `.local.json` files so the shared project config can be committed.
+## Why this exists
+
+MLflow supports tracing coding agents, but each agent uses a different config file, hook format, and environment setup. Some agents accept an experiment name while others (`@mlflow/codex`) require a numeric experiment ID, and putting Databricks profiles or bearer tokens directly into project config files makes them easy to leak into git.
+
+`claudetracing` standardizes that setup across a project and team:
+
+- **One setup for whichever agent you use**: Run `traces init` once in a repo to wire up Claude Code, Codex, Copilot, and Antigravity against the same MLflow experiment (defaulting to `/Workspace/Shared/<repo>` on Databricks). Teammates can switch between agents and still log to the same place.
+- **Shared project config, local credentials**: Project-level settings (experiment name/ID, enabled plugins, hooks) are written to files you can commit to the repo, while personal `~/.databrickscfg` profile names and tokens stay in gitignored `.local.json` files. The same committed config also works headlessly in CI with a service principal (`--spn`).
+- **No manual wiring**: It creates or looks up the MLflow experiment ID up front, installs the Claude Code plugin, chains into Codex Desktop's notify hook without clobbering it, and updates `.gitignore`.
 
 ## Install
 
