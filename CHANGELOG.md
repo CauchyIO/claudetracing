@@ -2,6 +2,11 @@
 
 What each claudetracing release changed, newest first. The pull request that bumps the version in `pyproject.toml` (`uv version --bump patch|minor|major`) adds its section here. When the bump lands on `master`, CI publishes the package to PyPI and creates the GitHub release with that section as its body.
 
+## v0.6.1
+
+- Depend on `mlflow>=3.14` instead of `mlflow[databricks]>=3.14`. The `databricks` extra pulled in `databricks-agents` and, through it, `whenever`, which has no Python 3.14 wheels, so `uv tool install claudetracing` failed on 3.14 machines without a Rust compiler. claudetracing uses none of the extra's packages; Databricks authentication comes from `databricks-sdk`, which `mlflow` already requires.
+- List Python 3.13 and 3.14 as supported; the test suite passes on 3.10 through 3.14.
+
 ## v0.6.0
 
 - Support Claude Code, Codex, GitHub Copilot (`copilot`), and Antigravity (`agy`) via `traces init --agent [all|both|claude|codex|copilot|agy]`.
