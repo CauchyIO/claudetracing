@@ -1,6 +1,6 @@
 [project]
 name = "claudetracing"
-version = "0.6.0"
+version = "0.6.1"
 description = "Standardized MLflow tracing setup and CLI for Claude Code, Codex, GitHub Copilot, and Antigravity (agy)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,10 +16,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "mlflow[databricks]>=3.14",
+    "mlflow>=3.14",
     "pydantic>=2.0",
     "typer>=0.9",
     "tomlkit>=0.13",
